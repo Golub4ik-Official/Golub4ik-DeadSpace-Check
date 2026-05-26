@@ -1,6 +1,13 @@
 scan_report.json
-username_popokok_report.json
+scan_report_*.json
+config_*.py
+complaint_message_cache.json.bak
 complaint_message_cache.json
 .idea/*
 __pycache__/*
 
+core/__pycache__/*
+models/__pycache__/*
+utils/__pycache__/*
+services/__pycache__/*
+services/reporting/__pycache__/*
