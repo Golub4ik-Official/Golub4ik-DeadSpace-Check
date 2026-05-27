@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import List, Dict, Any
 
 import discord
@@ -9,6 +10,8 @@ from services.admin_service import AdminService
 from services.cache_service import CacheService
 from services.discord_service import DiscordService
 from services.reporting import ReportService
+from services.reporting.config import ReportConfig
+from utils.path_utils import app_dir
 
 
 class BanCheckerBot:
@@ -18,8 +21,9 @@ class BanCheckerBot:
         self.client = discord.Client()
         self.discord_service = DiscordService(self.client)
         self.admin_service = AdminService(admin_panel)
-        self.cache_service = CacheService()
-        self.report_service = ReportService()
+        app_data = app_dir()
+        self.cache_service = CacheService(cache_filename=os.path.join(app_data, "complaint_message_cache.json"))
+        self.report_service = ReportService(config=ReportConfig(report_output_dir=os.path.join(app_data, "reports")))
         self.player_analyzer = PlayerAnalyzer()
         self.scanner = Scanner(
             self.discord_service,

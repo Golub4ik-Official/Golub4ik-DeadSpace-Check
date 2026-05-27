@@ -16,10 +16,11 @@ from admin_panel import AdminPanel
 from bot import BanCheckerBot
 from config_system import load_file, config as cfg
 from utils.logging_utils import setup_logging
+from utils.path_utils import app_dir, bundle_dir
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-SETTINGS_FILE = os.path.join(ROOT_DIR, "gui_settings.json")
-CONFIG_FILE = os.path.join(ROOT_DIR, "config.py")
+ROOT_DIR = bundle_dir()
+SETTINGS_FILE = os.path.join(app_dir(), "gui_settings.json")
+CONFIG_FILE = os.path.join(bundle_dir(), "config.py")
 
 ANSI_RE = re.compile(r'\x1b\[[\d;]*[a-zA-Z]')
 
@@ -819,7 +820,7 @@ class BanCheckerGUI:
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
     def _generate_html_report(self):
-        report_dir = os.path.join(ROOT_DIR, "reports")
+        report_dir = os.path.join(app_dir(), "reports")
         json_path = os.path.join(report_dir, "scan_report.json")
         if not os.path.exists(json_path):
             self._insert_colored(f"\nФайл отчёта не найден: {json_path}\n")
