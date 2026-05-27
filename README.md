@@ -1,72 +1,73 @@
 # Golub4ik (WikiHampter) DeadSpace Checker
 
-Инструмент для автоматизации Discord, который связывает телеметрию Discord с данными панели администратора DeadSpace14 для выявления вероятных обходов бана в near real time. Проект ориентирован на опытных администраторов серверов, которым нужны воспроизводимые цепочки доказательств и автоматическая триаж подозрительных аккаунтов.
+Инструмент для администраторов SS14, который связывает телеметрию Discord с данными панели администратора DeadSpace14 для выявления обходов бана.
 
 ## Возможности
 
-- Многослойная корреляция по HWID, IP, временным меткам и предыдущим банам с настраиваемыми порогами уверенности.
-- Автоматический парсинг Discord — события "Arrived new player" и каналы жалоб для построения графа аккаунтов.
-- Структурированный вывод: JSON (`reports/scan_report.json`) и консольные логи для интеграции с внешними инструментами.
-- Кэширование, контроль конкурентности и троттлинг, оптимизированные для high-volume сообществ.
-- Адаптивный оптимизатор нагрузки с circuit breaker, exponential backoff и emergency mode.
-- Поиск по интервалу сообщений, массовая проверка ban bypass и исследование отдельных пользователей.
+- Три режима сканирования: пробив по нику, сканирование новых сообщений, проверка обхода банов
+- Многослойная корреляция по HWID, IP, временным меткам и предыдущим банам
+- Автоматический парсинг Discord — события "Arrived new player" и каналы жалоб
+- Генерация HTML-отчётов с детальной информацией по каждому игроку
+- Кэширование, контроль конкурентности, circuit breaker и exponential backoff
+- Удобный GUI на tkinter с цветным выводом и встроенными настройками
 
 ## Быстрый старт
 
-```bash
-git clone https://github.com/yourusername/deadspace14-ban-detector.git
-cd deadspace14-ban-detector
-python -m venv .venv
-.venv\Scripts\activate  # PowerShell
-pip install -r requirements.txt
-copy config.py config_local.py  # опционально
-python main.py
+### Вариант 1 — Готовый EXE (Python не нужен)
+
 ```
+pip install pyinstaller
+pyinstaller DeadSpaceChecker.spec --noconfirm
+```
+
+Готовый файл появится в `dist/DeadSpaceChecker.exe`. Можно перенести куда угодно — при запуске он сам создаст `gui_settings.json` и папку `reports/`.
+
+**Уже собранный EXE** лежит в `dist/DeadSpaceChecker.exe` — просто запусти.
+
+### Вариант 2 — Из исходников (с Python)
+
+```bash
+git clone <repo>
+cd Golub4ik-DeadSpace-Check
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python gui.py
+```
+
+## Интерфейс
+
+Программа запускается через графическое окно (`gui.py`). Все настройки (токен Discord, учётные данные админки, параметры сканирования) задаются прямо в интерфейсе и сохраняются в `gui_settings.json`.
+
+- **Пробив игрока по нику** — вводишь ник, получаешь полную информацию: наказания, связанные аккаунты, IP, HWID, жалобы
+- **Сканирование новых сообщений** — мониторинг канала "Arrived new player"
+- **Проверка обхода банов** — массовая проверка на ban bypass
+
+После завершения сканирования можно сформировать HTML-отчёт.
+
+### Как получить Discord токен
+
+1. Открой Discord (десктоп или браузер)
+2. Нажми F12 (или Ctrl+Shift+I)
+3. Перейди на вкладку Network
+4. Отправь любое сообщение в чат
+5. Найди запрос к `discord.com/api/`
+6. Скопируй значение заголовка `authorization`
+
+## Сборка EXE (для разработчиков)
+
+```bash
+pip install pyinstaller
+pyinstaller DeadSpaceChecker.spec --noconfirm
+```
+
+EXE появится в `dist/DeadSpaceChecker.exe`. `config.py` вшивается внутрь — менять настройки можно через GUI, они сохранятся в `gui_settings.json` рядом с exe.
 
 ## Конфигурация
 
-Основные настройки в `config.py`. Чувствительные данные переопределите перед первым запуском.
+Основные настройки задаются через GUI (кнопка ⚙️). Для продвинутой конфигурации можно отредактировать `config.py` перед сборкой.
 
-### Discord
-
-| Ключ | Назначение |
-| --- | --- |
-| `DISCORD_USER_TOKEN` | Токен Discord для сканирования сообщений |
-| `TARGET_CHANNEL_ID` | ID канала с событиями новых игроков |
-| `COMPLAINT_CHANNEL_IDS` | ID каналов для поиска жалоб по никам |
-| `MESSAGE_HISTORY_LIMIT` | Лимит истории сообщений для каналов жалоб |
-
-### Авторизация
-
-| Ключ | Назначение |
-| --- | --- |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Учётные данные панели администратора DeadSpace14 |
-
-### API
-
-| Ключ | Назначение |
-| --- | --- |
-| `BASE_ADMIN_URL` | URL панели администратора |
-| `ACCOUNT_URL` | URL SSO (account.spacestation14.com) |
-| `MAX_CONCURRENT_REQUESTS` | Максимум параллельных HTTP-вызовов |
-| `OPERATION_TIMEOUT` / `REQUEST_TIMEOUT` / `SEARCH_TIMEOUT` | Таймауты операций |
-
-### Сканирование
-
-| Ключ | Назначение |
-| --- | --- |
-| `MESSAGE_LIMIT` | Количество сообщений для сканирования |
-| `CHECK_BAN_BYPASS` / `BAN_BYPASS_PAGES` | Режим проверки ban bypass |
-| `MAX_TERMS_PER_SCAN` | Максимум терминов за одно сканирование |
-| `SEARCH_MAX_DEPTH` / `SEARCH_LIMIT_*` | Глубина и лимиты рекурсивного поиска |
-
-### Тайминги и уверенность
-
-Пороги `CLOSE_TIME_THRESHOLD_MINUTES`, `TIME_THRESHOLD_MINUTES`, `SUSPICIOUS_TIME_THRESHOLD_MINUTES` и `IP_MATCH_TIMEDELTA_MINUTES` управляют чувствительностью детекции.
-
-Уровни уверенности: `HWID_MATCH`, `IP_VERY_CLOSE_TIME`, `IP_CLOSE_TIME`, `IP_MODERATE_TIME`, `IP_DISTANT_TIME`, `IP_MATCH`, `NO_MATCH`.
-
-## Режимы запуска
+## Режимы запуска (CLI)
 
 ```bash
 python main.py                                    # Базовое сканирование сообщений
@@ -74,32 +75,29 @@ python main.py --check-ban-bypass --ban-bypass-pages 10  # Проверка ban 
 python main.py --username <ник>                   # Исследование конкретного игрока
 ```
 
-Все результаты сохраняются в `reports/` и кэшируются в `complaint_message_cache.json`.
-
 ## Архитектура
 
 ```
-admin_panel.py              Скрапинг панели администратора DeadSpace14 (async, aiohttp, selectolax)
+gui.py                      Графический интерфейс (tkinter)
+admin_panel.py              Скрапинг панели администратора (async, aiohttp, selectolax)
 bot.py                      Координационный слой Discord (discord.py-self)
-core/scanner.py             Загрузка сообщений, постановка задач в очередь, circuit breaker, backoff
+core/scanner.py             Загрузка сообщений, очередь задач, circuit breaker
 core/analyzer.py            Корреляция и слияние игроков по никнеймам
-services/admin_service.py   Клиент API администратора, кэширование, оптимизатор нагрузки
+services/admin_service.py   Клиент API администратора, кэширование
 services/cache_service.py   Персистентное кэширование жалоб (JSON)
-services/discord_service.py Работа с Discord, поиск по каналам жалоб
-services/reporting/         Генерация отчётов (консоль + JSON), форматирование
+services/discord_service.py Работа с Discord, поиск по каналам
+services/reporting/         Генерация отчётов (HTML + JSON)
 models/                     Типизированные модели (Player, DiscordMessage, ScanResult, Verdict, Complaint)
 utils/                      Вспомогательные модули (async, logging, performance, URLs, embeds)
+DeadSpaceChecker.spec       Спецификация PyInstaller для сборки EXE
 ```
 
-Код асинхронный (asyncio), использует пакетную обработку запросов с per-service rate guards. `services/reporting/` отвечает за форматирование JSON и консольный вывод отчётов.
+## Заметки
 
-## Эксплуатационные заметки
-
-- Соблюдайте лимиты Discord и DeadSpace14; при троттлинге уменьшите `MAX_CONCURRENT_REQUESTS` или увеличьте `REQUEST_TIMEOUT`.
-- Храните секреты вне репозитория (`config_local.py`, переменные окружения, секрет-менеджеры).
-- Убедитесь в правах Discord на чтение целевых каналов перед запуском.
-- Конфигурация может загружаться из `.json`, `.yaml` или `.py` файлов (см. `config_system.py`).
+- Соблюдайте лимиты Discord и DeadSpace14; при троттлинге уменьшите лимиты в настройках GUI
+- Храните секреты вне репозитория
+- Убедитесь в правах Discord на чтение целевых каналов перед запуском
 
 ## Лицензия
 
-MIT. Использование ограничено легитимными сценариями модерации и безопасности. Автор не поддерживает harassment, нарушение приватности или нарушение правил платформ.
+MIT. Использование ограничено легитимными сценариями модерации и безопасности.
