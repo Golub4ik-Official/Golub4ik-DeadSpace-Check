@@ -410,6 +410,15 @@ class BanCheckerGUI:
             messagebox.showerror("Ошибка", "Укажите имя игрока для пробива")
             return
 
+        cache_file = os.path.join(app_dir(), "complaint_message_cache.json")
+        if not os.path.exists(cache_file):
+            messagebox.showwarning(
+                "Первый запуск",
+                "Кэш жалоб ещё не создан.\n\n"
+                "Первый поиск будет ОЧЕНЬ ДОЛГИМ (скачиваются все сообщения из каналов жалоб Discord).\n"
+                "Это нормально. После завершения кэш сохранится, и следующие запуски будут быстрыми."
+            )
+
         self.output_text.delete("1.0", tk.END)
         self.progress_var.set(0)
         self.progress_label.config(text="")

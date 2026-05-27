@@ -22,7 +22,8 @@ class CacheService:
         complaint_channels: Dict[int, ComplaintChannel] = {}
 
         if not os.path.exists(self.cache_filename):
-            self.logger.info("Complaint message cache file not found.")
+            self.logger.warning("Файл кэша жалоб не найден. Первый запуск будет очень долгим — скачиваются все сообщения из каналов жалоб. "
+                                "Это нормально. После завершения кэш сохранится, и следующие запуски будут быстрыми.")
             return complaint_channels
 
         for retry in range(MAX_RETRIES):
