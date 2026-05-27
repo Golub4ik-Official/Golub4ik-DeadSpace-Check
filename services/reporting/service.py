@@ -8,7 +8,7 @@ from models.message import ScanResult
 from models.player import Player
 from services.reporting.config import (
     ReportConfig, DISPLAY_LIMITS, LAYOUT_CONFIG,
-    TIME_ANALYSIS_THRESHOLDS, BOX_CHARS, PLAYER_STATUS
+    TIME_ANALYSIS_THRESHOLDS, PLAYER_STATUS
 )
 from services.reporting.formatter import ReportFormatter
 from services.reporting.utils import (
@@ -214,14 +214,14 @@ class ReportService:
         title_str_colored = f"{self.formatter._get_fmt(*title_color_keys)}{title}{self.formatter.fmt['END']}"
         
         char_prefix = "DOUBLE_" if box_char_set == 'DOUBLE' else ""
-        v_char = BOX_CHARS[f'{char_prefix}V']
-        tl_char = BOX_CHARS[f'{char_prefix}TL']
-        tr_char = BOX_CHARS[f'{char_prefix}TR']
-        h_char = BOX_CHARS[f'{char_prefix}H']
-        vr_char = BOX_CHARS[f'{char_prefix}VR']
-        vl_char = BOX_CHARS[f'{char_prefix}VL']
-        bl_char = BOX_CHARS[f'{char_prefix}BL']
-        br_char = BOX_CHARS[f'{char_prefix}BR']
+        v_char = self.formatter.box[f'{char_prefix}V']
+        tl_char = self.formatter.box[f'{char_prefix}TL']
+        tr_char = self.formatter.box[f'{char_prefix}TR']
+        h_char = self.formatter.box[f'{char_prefix}H']
+        vr_char = self.formatter.box[f'{char_prefix}VR']
+        vl_char = self.formatter.box[f'{char_prefix}VL']
+        bl_char = self.formatter.box[f'{char_prefix}BL']
+        br_char = self.formatter.box[f'{char_prefix}BR']
 
         print(f"\n{base_indent_str}{box_color_outer_str}{tl_char}{h_char * h_bar_len}{tr_char}{self.formatter.fmt['END']}")
         
@@ -281,7 +281,7 @@ class ReportService:
 
 
         def print_cat_header(cat_title, color_keys=('WHITE','BOLD',)):
-            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt(*color_keys)}■ {cat_title.upper()}:{fmt['END']}",
+            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt(*color_keys)}{self.formatter.box['FILLED_CIRCLE']} {cat_title.upper()}:{fmt['END']}",
                                              box_v_char_colored, base_indent_str, line_padding_in_box)
         
         sub_item_indent_str = item_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING']
@@ -306,14 +306,14 @@ class ReportService:
                 for hwid_val, alts_on_hwid in hwid_data.items():
                     if count >= display_hwid_limit: break
                     self.formatter.print_line_in_box(
-                        f"{sub_sub_item_indent_str}{BOX_CHARS['SUB_ARROW']} {self.formatter.format_hwid(hwid_val)} links to: "
+                        f"{sub_sub_item_indent_str}{self.formatter.box['SUB_ARROW']} {self.formatter.format_hwid(hwid_val)} links to: "
                         f"{self.formatter.truncate_list([fmt['WHITE'] + alt + fmt['END'] for alt in alts_on_hwid], list_display_limit)}",
                         box_v_char_colored, base_indent_str, line_padding_in_box
                     )
                     count +=1
                 if len(hwid_data) > count:
                      self.formatter.print_line_in_box(
-                         f"{sub_sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {len(hwid_data) - count} more HWIDs{fmt['END']}",
+                         f"{sub_sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {len(hwid_data) - count} more HWIDs{fmt['END']}",
                          box_v_char_colored, base_indent_str, line_padding_in_box
                      )
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
@@ -335,14 +335,14 @@ class ReportService:
             for hwid_val, alts_list in hwid_map.items():
                 if count >= display_alt_hwid_limit: break
                 self.formatter.print_line_in_box(
-                    f"{sub_sub_item_indent_str}{BOX_CHARS['SUB_ARROW']} {self.formatter.format_hwid(hwid_val)} links alts: "
+                    f"{sub_sub_item_indent_str}{self.formatter.box['SUB_ARROW']} {self.formatter.format_hwid(hwid_val)} links alts: "
                     f"{self.formatter.truncate_list([fmt['WHITE'] + alt + fmt['END'] for alt in alts_list], list_display_limit)}",
                     box_v_char_colored, base_indent_str, line_padding_in_box
                 )
                 count += 1
             if num_hwids_involved > count:
                 self.formatter.print_line_in_box(
-                    f"{sub_sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {num_hwids_involved - count} more HWIDs{fmt['END']}",
+                    f"{sub_sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {num_hwids_involved - count} more HWIDs{fmt['END']}",
                     box_v_char_colored, base_indent_str, line_padding_in_box
                 )
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
@@ -359,10 +359,10 @@ class ReportService:
                 
                 line = (f"{fmt['WHITE']}{conn['nickname']}{fmt['END']}: {self.formatter.format_confidence(conn['strength_str'])} "
                         f"({fmt['GRAY']}Evidence: {evidence_str}{fmt['END']})")
-                self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['RIGHT_ARROW']} {line}", box_v_char_colored, base_indent_str, line_padding_in_box)
+                self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['RIGHT_ARROW']} {line}", box_v_char_colored, base_indent_str, line_padding_in_box)
             if len(categorized["likely_connections"]) > list_display_limit:
                  self.formatter.print_line_in_box(
-                     f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and "
+                     f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and "
                      f"{len(categorized['likely_connections']) - list_display_limit} more{fmt['END']}",
                      box_v_char_colored, base_indent_str, line_padding_in_box
                  )
@@ -387,13 +387,13 @@ class ReportService:
                  for nick_val, num_ips in ip_matches.items():
                      if count >= list_display_limit: break
                      self.formatter.print_line_in_box(
-                         f"{sub_sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['WHITE']}{nick_val}{fmt['END']} ({fmt['GRAY']}{num_ips} shared IP(s) with {nickname}{fmt['END']})",
+                         f"{sub_sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['WHITE']}{nick_val}{fmt['END']} ({fmt['GRAY']}{num_ips} shared IP(s) with {nickname}{fmt['END']})",
                          box_v_char_colored, base_indent_str, line_padding_in_box
                      )
                      count +=1
                  if len(ip_matches) > count:
                      self.formatter.print_line_in_box(
-                         f"{sub_sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and "
+                         f"{sub_sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and "
                          f"{len(ip_matches) - count} more IP-connected accounts{fmt['END']}",
                          box_v_char_colored, base_indent_str, line_padding_in_box
                      )
@@ -436,7 +436,7 @@ class ReportService:
             f"BAN REASONS ({len(player.ban_reasons)})", 
             indent_str=base_indent_str, width=box_width, style='warning'
         )
-        v_char_content_box_colored = f"{self.formatter._get_fmt('BOLD')}{BOX_CHARS['V']}{self.formatter.fmt['END']}"
+        v_char_content_box_colored = f"{self.formatter._get_fmt('BOLD')}{self.formatter.box['V']}{self.formatter.fmt['END']}"
         self.formatter.print_content_box_start(width=box_width, indent_str=base_indent_str)
         
         limit = self.config.get_specific_display_limit('BAN_REASON_DISPLAY_LIMIT')
@@ -470,12 +470,12 @@ class ReportService:
             if i < limit - 1 and i < len(player.ban_reasons) -1 :
                 sep_len = content_area_width - len(item_indent_str)
                 if sep_len < 0: sep_len = 0
-                sep_line = BOX_CHARS['H'] * sep_len
+                sep_line = self.formatter.box['H'] * sep_len
                 self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('GRAY')}{sep_line}{self.formatter.fmt['END']}", 
                                                  v_char_content_box_colored, base_indent_str, line_padding_in_box)
 
         if len(player.ban_reasons) > limit:
-            self.formatter.print_line_in_box(f"{item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}... and {len(player.ban_reasons) - limit} more ban reasons{fmt['END']}",
+            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}... and {len(player.ban_reasons) - limit} more ban reasons{fmt['END']}",
                                             v_char_content_box_colored, base_indent_str, line_padding_in_box)
 
         self.formatter.print_content_box_end(width=box_width, indent_str=base_indent_str)
@@ -501,21 +501,21 @@ class ReportService:
         self.formatter.print_line_in_box(f"{item_indent_str}{fmt['WHITE_BOLD']}Overview:{fmt['END']} {fmt['WHITE']}{total_conn}{fmt['END']} alts connected via explicit paths", box_v_char_colored, base_indent_str, line_padding_in_box)
         
         if connection_data["direct_connections"]:
-            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('RED', 'BOLD')}■ DIRECT CONNECTIONS ({len(connection_data['direct_connections'])}):{self.formatter.fmt['END']}",
+            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('RED', 'BOLD')}{self.formatter.box['FILLED_CIRCLE']} DIRECT CONNECTIONS ({len(connection_data['direct_connections'])}):{self.formatter.fmt['END']}",
                                              box_v_char_colored, base_indent_str, line_padding_in_box)
             limit = self.config.get_specific_display_limit('CONNECTION_PATH_DISPLAY_LIMIT')
             count = 0
             for target_nick, info in connection_data["direct_connections"].items():
                 if count >= limit: break
-                path_line = f"{BOX_CHARS['SUB_ARROW']} {info['path']} ({self.formatter.format_confidence(info['confidence'])})"
+                path_line = f"{self.formatter.box['SUB_ARROW']} {info['path']} ({self.formatter.format_confidence(info['confidence'])})"
                 self.formatter.print_line_in_box(f"{sub_item_indent_str}{path_line}", box_v_char_colored, base_indent_str, line_padding_in_box)
                 count +=1
             if len(connection_data["direct_connections"]) > count:
-                 self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {len(connection_data['direct_connections'])-count} more{fmt['END']}", box_v_char_colored, base_indent_str, line_padding_in_box)   
+                 self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {len(connection_data['direct_connections'])-count} more{fmt['END']}", box_v_char_colored, base_indent_str, line_padding_in_box)   
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
         if connection_data["indirect_connections"]:
-            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('YELLOW', 'BOLD')}■ INDIRECT CONNECTIONS ({len(connection_data['indirect_connections'])}):{self.formatter.fmt['END']}",
+            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('YELLOW', 'BOLD')}{self.formatter.box['FILLED_CIRCLE']} INDIRECT CONNECTIONS ({len(connection_data['indirect_connections'])}):{self.formatter.fmt['END']}",
                                              box_v_char_colored, base_indent_str, line_padding_in_box)
             limit_via_groups = self.config.get_specific_display_limit('CONNECTION_PATH_DISPLAY_LIMIT') 
             paths_per_via_limit = DISPLAY_LIMITS['SMALL']
@@ -532,20 +532,20 @@ class ReportService:
                         target_nick = conn_detail["nick"]
                         full_info = connection_data["indirect_connections"].get(target_nick)
                         if full_info and full_info['via'] == via_nick : 
-                            path_line = f"  {BOX_CHARS['SUB_ARROW']} {full_info['path']} ({self.formatter.format_confidence(full_info['confidence'])})"
+                            path_line = f"  {self.formatter.box['SUB_ARROW']} {full_info['path']} ({self.formatter.format_confidence(full_info['confidence'])})"
                             self.formatter.print_line_in_box(f"{sub_item_indent_str}{path_line}", box_v_char_colored, base_indent_str, line_padding_in_box)
                             displayed_paths_for_this_via +=1
                 
                 total_paths_for_this_via = sum(len(data[ct_key]) for ct_key in data)
                 if total_paths_for_this_via > displayed_paths_for_this_via:
-                    self.formatter.print_line_in_box(f"{sub_item_indent_str}    {BOX_CHARS['BULLET']} {fmt['GRAY']}...and {total_paths_for_this_via - displayed_paths_for_this_via} more paths via {via_nick}{fmt['END']}", box_v_char_colored, base_indent_str, line_padding_in_box)
+                    self.formatter.print_line_in_box(f"{sub_item_indent_str}    {self.formatter.box['BULLET']} {fmt['GRAY']}...and {total_paths_for_this_via - displayed_paths_for_this_via} more paths via {via_nick}{fmt['END']}", box_v_char_colored, base_indent_str, line_padding_in_box)
                 
                 displayed_via_groups +=1
                 if displayed_via_groups < len(connection_data["indirect_by_via"]) and displayed_via_groups < limit_via_groups:
                     self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
             if len(connection_data["indirect_by_via"]) > displayed_via_groups :
-                self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and connections through {len(connection_data['indirect_by_via'])-displayed_via_groups} more accounts{fmt['END']}", box_v_char_colored, base_indent_str, line_padding_in_box)   
+                self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and connections through {len(connection_data['indirect_by_via'])-displayed_via_groups} more accounts{fmt['END']}", box_v_char_colored, base_indent_str, line_padding_in_box)   
 
         end_box()
 
@@ -562,7 +562,7 @@ class ReportService:
         content_display_indent_str = sub_item_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING'] 
 
         self.formatter.print_line_in_box(
-            f"{item_indent_str}{self.formatter._get_fmt(*title_color_keys)}■ {title_prefix} ({fmt['WHITE']}{len(complaints)}{fmt['END']}):{self.formatter.fmt['END']}",
+            f"{item_indent_str}{self.formatter._get_fmt(*title_color_keys)}{self.formatter.box['FILLED_CIRCLE']} {title_prefix} ({fmt['WHITE']}{len(complaints)}{fmt['END']}):{self.formatter.fmt['END']}",
             box_v_char_colored, base_indent_str, line_padding_in_box
         )
         limit = self.config.get_specific_display_limit(limit_key)
@@ -611,7 +611,7 @@ class ReportService:
                     self.formatter.print_line_in_box(f"{content_display_indent_str}{LAYOUT_CONFIG['DEFAULT_INDENT_STRING']}{fmt['WHITE']}{line}{fmt['END']}", 
                                                      box_v_char_colored, base_indent_str, line_padding_in_box)
         if len(complaints) > limit:
-            self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}... and {len(complaints) - limit} more{fmt['END']}", 
+            self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}... and {len(complaints) - limit} more{fmt['END']}", 
                                              box_v_char_colored, base_indent_str, line_padding_in_box)
         self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
@@ -670,7 +670,7 @@ class ReportService:
         sub_item_indent_str = item_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING']
         details_indent_str = sub_item_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING']
 
-        self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt(*color_keys)}■ {title} ({fmt['WHITE']}{len(items)}{fmt['END']}):{self.formatter.fmt['END']}",
+        self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt(*color_keys)}{self.formatter.box['FILLED_CIRCLE']} {title} ({fmt['WHITE']}{len(items)}{fmt['END']}):{self.formatter.fmt['END']}",
                                          box_v_char_colored, base_indent_str, line_padding_in_box)
         limit = self.config.get_specific_display_limit(limit_name)
         
@@ -683,7 +683,7 @@ class ReportService:
             else:
                 identifier_val, users_list = item_data, [nickname_for_context]
 
-            self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {formatter_func(identifier_val)}", 
+            self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {formatter_func(identifier_val)}", 
                                              box_v_char_colored, base_indent_str, line_padding_in_box)
             
             users_set = set(users_list)
@@ -696,29 +696,29 @@ class ReportService:
 
             if show_only_user_if_single and len(users_set) == 1 and primary_present:
                 self.formatter.print_line_in_box(
-                    f"{details_indent_str}{BOX_CHARS['SUB_ARROW']} {self.formatter._get_fmt('GREEN')}Only user ({fmt['WHITE']}{primary_user}{fmt['END']}){self.formatter.fmt['END']}",
+                    f"{details_indent_str}{self.formatter.box['SUB_ARROW']} {self.formatter._get_fmt('GREEN')}Only user ({fmt['WHITE']}{primary_user}{fmt['END']}){self.formatter.fmt['END']}",
                     box_v_char_colored, base_indent_str, line_padding_in_box)
             else:
                 if primary_present:
                     self.formatter.print_line_in_box(
-                        f"{details_indent_str}{BOX_CHARS['SUB_ARROW']} {self.formatter._get_fmt('GREEN')}Used by {fmt['WHITE']}{primary_user}{fmt['END']}{self.formatter.fmt['END']}",
+                        f"{details_indent_str}{self.formatter.box['SUB_ARROW']} {self.formatter._get_fmt('GREEN')}Used by {fmt['WHITE']}{primary_user}{fmt['END']}{self.formatter.fmt['END']}",
                         box_v_char_colored, base_indent_str, line_padding_in_box)
                 if alts_present:
                     alt_display_list = [fmt['WHITE'] + alt + fmt['END'] for alt in alts_present]
                     self.formatter.print_line_in_box(
-                        f"{details_indent_str}{BOX_CHARS['SUB_ARROW']} {self.formatter._get_fmt('YELLOW')}Shared with Alt(s): {self.formatter.truncate_list(alt_display_list, user_list_trunc_limit)}{self.formatter.fmt['END']}",
+                        f"{details_indent_str}{self.formatter.box['SUB_ARROW']} {self.formatter._get_fmt('YELLOW')}Shared with Alt(s): {self.formatter.truncate_list(alt_display_list, user_list_trunc_limit)}{self.formatter.fmt['END']}",
                         box_v_char_colored, base_indent_str, line_padding_in_box)
                 if others_present:
                     others_display_list = [fmt['WHITE'] + other + fmt['END'] for other in others_present]
                     label_color = 'GRAY' if (primary_present or alts_present) else 'WHITE'
                     label = "Shared with Others" if (primary_present or alts_present) else "Users"
                     self.formatter.print_line_in_box(
-                        f"{details_indent_str}{BOX_CHARS['SUB_ARROW']} {self.formatter._get_fmt(label_color)}{label}: {self.formatter.truncate_list(others_display_list, user_list_trunc_limit)}{self.formatter.fmt['END']}",
+                        f"{details_indent_str}{self.formatter.box['SUB_ARROW']} {self.formatter._get_fmt(label_color)}{label}: {self.formatter.truncate_list(others_display_list, user_list_trunc_limit)}{self.formatter.fmt['END']}",
                         box_v_char_colored, base_indent_str, line_padding_in_box)
 
 
         if len(items) > limit:
-            self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {len(items)-limit} more{fmt['END']}", 
+            self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {len(items)-limit} more{fmt['END']}", 
                                              box_v_char_colored, base_indent_str, line_padding_in_box)
         self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
@@ -740,15 +740,15 @@ class ReportService:
         line_padding_in_box = 1
         
         if original_ips:
-            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('GREEN', 'BOLD')}■ PRIMARY IPs ({fmt['WHITE']}{len(original_ips)}{fmt['END']}) - Used only by {nickname}:{self.formatter.fmt['END']}", 
+            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('GREEN', 'BOLD')}{self.formatter.box['FILLED_CIRCLE']} PRIMARY IPs ({fmt['WHITE']}{len(original_ips)}{fmt['END']}) - Used only by {nickname}:{self.formatter.fmt['END']}", 
                                              box_v_char_colored, base_indent_str, line_padding_in_box)
             limit = self.config.get_specific_display_limit('IP_OWNED_DISPLAY_LIMIT')
             sub_item_indent_str = item_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING']
             for i, ip_addr in enumerate(original_ips[:limit]):
-                self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {self.formatter._get_fmt('BRIGHT_CYAN')}{ip_addr}{self.formatter.fmt['END']}", 
+                self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {self.formatter._get_fmt('BRIGHT_CYAN')}{ip_addr}{self.formatter.fmt['END']}", 
                                                  box_v_char_colored, base_indent_str, line_padding_in_box)
             if len(original_ips) > limit:
-                self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {len(original_ips)-limit} more primary IPs{fmt['END']}", 
+                self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {len(original_ips)-limit} more primary IPs{fmt['END']}", 
                                                  box_v_char_colored, base_indent_str, line_padding_in_box)
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
@@ -818,12 +818,12 @@ class ReportService:
                 self.formatter.print_line_in_box(login_line, box_v_char_colored, base_indent_str, line_padding_in_box)
                 
                 if login.get('user_name', nickname) != nickname:
-                     self.formatter.print_line_in_box(f"{sub_item_indent_str}   {BOX_CHARS['SUB_ARROW']} {fmt['GRAY']}Attempted as: {self.formatter._get_fmt('YELLOW')}{login.get('user_name')}{self.formatter.fmt['END']}", 
+                     self.formatter.print_line_in_box(f"{sub_item_indent_str}   {self.formatter.box['SUB_ARROW']} {fmt['GRAY']}Attempted as: {self.formatter._get_fmt('YELLOW')}{login.get('user_name')}{self.formatter.fmt['END']}", 
                                                       box_v_char_colored, base_indent_str, line_padding_in_box)
                 displayed_count += 1
             
             if len(recent_logins) > displayed_count and displayed_count >= limit :
-                self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {len(recent_logins)-displayed_count} more recent logins{fmt['END']}", 
+                self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {len(recent_logins)-displayed_count} more recent logins{fmt['END']}", 
                                                  box_v_char_colored, base_indent_str, line_padding_in_box)
 
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
@@ -841,16 +841,16 @@ class ReportService:
                 self.formatter.print_line_in_box(login_line, box_v_char_colored, base_indent_str, line_padding_in_box)
 
                 if login.get('user_name', nickname) != nickname:
-                     self.formatter.print_line_in_box(f"{sub_item_indent_str}   {BOX_CHARS['SUB_ARROW']} {fmt['GRAY']}Attempted as: {self.formatter._get_fmt('YELLOW')}{login.get('user_name')}{self.formatter.fmt['END']}", 
+                     self.formatter.print_line_in_box(f"{sub_item_indent_str}   {self.formatter.box['SUB_ARROW']} {fmt['GRAY']}Attempted as: {self.formatter._get_fmt('YELLOW')}{login.get('user_name')}{self.formatter.fmt['END']}", 
                                                       box_v_char_colored, base_indent_str, line_padding_in_box)
                 displayed_count +=1 
             
             if len(older_logins) > older_to_show:
-                 self.formatter.print_line_in_box(f"{sub_item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {len(older_logins)-older_to_show} more older logins{fmt['END']}", 
+                 self.formatter.print_line_in_box(f"{sub_item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {len(older_logins)-older_to_show} more older logins{fmt['END']}", 
                                                   box_v_char_colored, base_indent_str, line_padding_in_box)
         
         if len(player.denied_logins) > limit and displayed_count >= limit : 
-             self.formatter.print_line_in_box(f"{item_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...displaying {limit} of {len(player.denied_logins)} total logins.{fmt['END']}", 
+             self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...displaying {limit} of {len(player.denied_logins)} total logins.{fmt['END']}", 
                                               box_v_char_colored, base_indent_str, line_padding_in_box)
         end_box()
 
@@ -885,7 +885,7 @@ class ReportService:
             reason_lines = reason_text_full.splitlines()
             first_reason_line_colored = fmt['WHITE'] + (reason_lines[0] if reason_lines else "No reason text") + fmt['END']
             
-            display_line_first = f"{sub_indent_str}{BOX_CHARS['SUB_ARROW']} {first_reason_line_colored}"
+            display_line_first = f"{sub_indent_str}{self.formatter.box['SUB_ARROW']} {first_reason_line_colored}"
             if account_name_str_colored:
                 display_line_first += f" {account_name_str_colored}"
             print(display_line_first)
@@ -900,7 +900,7 @@ class ReportService:
 
 
         if total_ban_reasons > limit:
-            print(f"{sub_indent_str}{BOX_CHARS['BULLET']} {fmt['GRAY']}...and {total_ban_reasons - limit} more ban reasons.{fmt['END']}")
+            print(f"{sub_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}...and {total_ban_reasons - limit} more ban reasons.{fmt['END']}")
 
     def _print_player_complaints_details_message_scan(self, player: Player, primary_nickname: str,
                                                       indent_str: str) -> int:
@@ -941,13 +941,13 @@ class ReportService:
             num_complaints_to_show = self.config.get_specific_display_limit(display_limit_key)
 
             print(
-                f"{sub_indent_str}{self.formatter._get_fmt(*cat_color_keys)}{BOX_CHARS['BULLET']} {cat_name_str} ({fmt['WHITE']}{len(complaints_list)}{fmt['END']}):{fmt['END']}")
+                f"{sub_indent_str}{self.formatter._get_fmt(*cat_color_keys)}{self.formatter.box['BULLET']} {cat_name_str} ({fmt['WHITE']}{len(complaints_list)}{fmt['END']}):{fmt['END']}")
 
             # num_complaints_to_show is already fetched above
 
             for c_idx, c in enumerate(complaints_list[:num_complaints_to_show]):
                 link_str_raw = c.get('link', 'N/A')
-                plain_prefix_for_link = f"{content_link_indent_str}{BOX_CHARS['SUB_ARROW']} "
+                plain_prefix_for_link = f"{content_link_indent_str}{self.formatter.box['SUB_ARROW']} "
 
                 width_for_link_text = overall_content_width_guide - len(plain_prefix_for_link)
                 if width_for_link_text < 20: width_for_link_text = 20
@@ -960,7 +960,7 @@ class ReportService:
                 for k_link, link_part_text in enumerate(wrapped_link_parts):
                     colored_link_part = f"{fmt['BLUE_UNDERLINE']}{link_part_text}{fmt['END']}"
                     if k_link == 0:
-                        print(f"{content_link_indent_str}{BOX_CHARS['SUB_ARROW']} {colored_link_part}")
+                        print(f"{content_link_indent_str}{self.formatter.box['SUB_ARROW']} {colored_link_part}")
                     else:
                         print(f"{' ' * len(plain_prefix_for_link)}{colored_link_part}")
 
@@ -1014,17 +1014,17 @@ class ReportService:
             details_indent_str = sub_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING'] 
             
             if original_ips:
-                print(f"{sub_indent_str}{fmt['GREEN_BOLD']}{BOX_CHARS['BULLET']} Primary IPs ({fmt['WHITE']}{len(original_ips)}{fmt['END']}):{fmt['END']} {self.formatter.truncate_list([self.formatter._get_fmt('BRIGHT_CYAN') + ip + self.formatter.fmt['END'] for ip in original_ips], list_trunc_limit)}")
+                print(f"{sub_indent_str}{fmt['GREEN_BOLD']}{self.formatter.box['BULLET']} Primary IPs ({fmt['WHITE']}{len(original_ips)}{fmt['END']}):{fmt['END']} {self.formatter.truncate_list([self.formatter._get_fmt('BRIGHT_CYAN') + ip + self.formatter.fmt['END'] for ip in original_ips], list_trunc_limit)}")
             
             if shared_ips:
-                print(f"{sub_indent_str}{fmt['YELLOW_BOLD']}{BOX_CHARS['BULLET']} Shared with {primary_nickname} ({fmt['WHITE']}{len(shared_ips)}{fmt['END']}):{fmt['END']}")
+                print(f"{sub_indent_str}{fmt['YELLOW_BOLD']}{self.formatter.box['BULLET']} Shared with {primary_nickname} ({fmt['WHITE']}{len(shared_ips)}{fmt['END']}):{fmt['END']}")
                 for i, (ip, users) in enumerate(shared_ips[:list_trunc_limit]):
                     others = [u for u in users if u != primary_nickname]
                     print(f"{details_indent_str}{self.formatter._get_fmt('BRIGHT_CYAN')}{ip}{self.formatter.fmt['END']} ({fmt['GRAY']}with: {self.formatter.truncate_list([fmt['WHITE'] + o + fmt['END'] for o in others], list_trunc_limit)}{fmt['END']})")
                 if len(shared_ips) > list_trunc_limit: print(f"{details_indent_str}{fmt['GRAY']}...and {len(shared_ips)-list_trunc_limit} more.{fmt['END']}")
 
             if alt_shared_ips:
-                print(f"{sub_indent_str}{fmt['YELLOW_BOLD']}{BOX_CHARS['BULLET']} Shared with Player's Alts ({fmt['WHITE']}{len(alt_shared_ips)}{fmt['END']}):{fmt['END']}")
+                print(f"{sub_indent_str}{fmt['YELLOW_BOLD']}{self.formatter.box['BULLET']} Shared with Player's Alts ({fmt['WHITE']}{len(alt_shared_ips)}{fmt['END']}):{fmt['END']}")
                 player_nicks_set = set(getattr(player, 'nicknames', []))
                 for i, (ip, users) in enumerate(alt_shared_ips[:list_trunc_limit]):
                     alt_users_on_ip = sorted(list({u for u in users if u in player_nicks_set and u != primary_nickname}))
@@ -1036,7 +1036,7 @@ class ReportService:
                 if len(alt_shared_ips) > list_trunc_limit: print(f"{details_indent_str}{fmt['GRAY']}...and {len(alt_shared_ips)-list_trunc_limit} more.{fmt['END']}")
             
             if multi_user_ips:
-                print(f"{sub_indent_str}{fmt['GRAY_BOLD']}{BOX_CHARS['BULLET']} Other Multi-User IPs ({fmt['WHITE']}{len(multi_user_ips)}{fmt['END']}):{fmt['END']}")
+                print(f"{sub_indent_str}{fmt['GRAY_BOLD']}{self.formatter.box['BULLET']} Other Multi-User IPs ({fmt['WHITE']}{len(multi_user_ips)}{fmt['END']}):{fmt['END']}")
                 for i, (ip, users) in enumerate(multi_user_ips[:list_trunc_limit]):
                      print(f"{details_indent_str}{self.formatter._get_fmt('BRIGHT_CYAN')}{ip}{self.formatter.fmt['END']} ({fmt['GRAY']}users: {self.formatter.truncate_list([fmt['WHITE'] + u + fmt['END'] for u in sorted(list(set(users)))], list_trunc_limit)}{fmt['END']})")
                 if len(multi_user_ips) > list_trunc_limit: print(f"{details_indent_str}{fmt['GRAY']}...and {len(multi_user_ips)-list_trunc_limit} more.{fmt['END']}")
@@ -1061,7 +1061,7 @@ class ReportService:
             details_indent_str = sub_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING']
 
             if owned_hwids: 
-                print(f"{sub_indent_str}{fmt['GREEN_BOLD']}{BOX_CHARS['BULLET']} Primary HWIDs ({fmt['WHITE']}{len(owned_hwids)}{fmt['END']}):{fmt['END']}")
+                print(f"{sub_indent_str}{fmt['GREEN_BOLD']}{self.formatter.box['BULLET']} Primary HWIDs ({fmt['WHITE']}{len(owned_hwids)}{fmt['END']}):{fmt['END']}")
                 for i, (hwid, users) in enumerate(owned_hwids[:list_trunc_limit]):
                     others = [u for u in users if u != primary_nickname]
                     if not others: 
@@ -1071,7 +1071,7 @@ class ReportService:
                 if len(owned_hwids) > list_trunc_limit: print(f"{details_indent_str}{fmt['GRAY']}...and {len(owned_hwids)-list_trunc_limit} more.{fmt['END']}")
             
             if alt_hwids:
-                print(f"{sub_indent_str}{fmt['YELLOW_BOLD']}{BOX_CHARS['BULLET']} Player's Alt HWIDs ({fmt['WHITE']}{len(alt_hwids)}{fmt['END']}):{fmt['END']}")
+                print(f"{sub_indent_str}{fmt['YELLOW_BOLD']}{self.formatter.box['BULLET']} Player's Alt HWIDs ({fmt['WHITE']}{len(alt_hwids)}{fmt['END']}):{fmt['END']}")
                 player_nicks_set = set(getattr(player, 'nicknames', []))
                 for i, (hwid, users) in enumerate(alt_hwids[:list_trunc_limit]):
                     alt_users_on_hwid = sorted(list({u for u in users if u in player_nicks_set and u != primary_nickname}))
@@ -1083,7 +1083,7 @@ class ReportService:
                 if len(alt_hwids) > list_trunc_limit: print(f"{details_indent_str}{fmt['GRAY']}...and {len(alt_hwids)-list_trunc_limit} more.{fmt['END']}")
 
             if other_hwids:
-                print(f"{sub_indent_str}{fmt['GRAY_BOLD']}{BOX_CHARS['BULLET']} Other Shared HWIDs ({fmt['WHITE']}{len(other_hwids)}{fmt['END']}):{fmt['END']}")
+                print(f"{sub_indent_str}{fmt['GRAY_BOLD']}{self.formatter.box['BULLET']} Other Shared HWIDs ({fmt['WHITE']}{len(other_hwids)}{fmt['END']}):{fmt['END']}")
                 for i, (hwid, users) in enumerate(other_hwids[:list_trunc_limit]):
                      print(f"{details_indent_str}{self.formatter.format_hwid(hwid)} ({fmt['GRAY']}users: {self.formatter.truncate_list([fmt['WHITE'] + u + fmt['END'] for u in sorted(list(set(users)))], list_trunc_limit)}{fmt['END']})")
                 if len(other_hwids) > list_trunc_limit: print(f"{details_indent_str}{fmt['GRAY']}...and {len(other_hwids)-list_trunc_limit} more.{fmt['END']}")
@@ -1178,7 +1178,7 @@ class ReportService:
             problematic_content_indent = message_content_indent + LAYOUT_CONFIG['DEFAULT_INDENT_STRING']
             for p_nick, p_status, p_bans in summary_data["problematic_players"][:limit]:
                 p_status_fmt = self.formatter.format_status(p_status) 
-                print(f"{problematic_content_indent}{BOX_CHARS['BULLET']} {fmt['WHITE']}{p_nick}{fmt['END']}: {p_status_fmt} ({fmt['GRAY']}Bans: {self.formatter.format_count(p_bans)}{fmt['END']})")
+                print(f"{problematic_content_indent}{self.formatter.box['BULLET']} {fmt['WHITE']}{p_nick}{fmt['END']}: {p_status_fmt} ({fmt['GRAY']}Bans: {self.formatter.format_count(p_bans)}{fmt['END']})")
             if len(summary_data["problematic_players"]) > limit:
-                print(f"{problematic_content_indent}{BOX_CHARS['BULLET']} {fmt['GRAY']}... and {len(summary_data['problematic_players']) - limit} more.{fmt['END']}")
+                print(f"{problematic_content_indent}{self.formatter.box['BULLET']} {fmt['GRAY']}... and {len(summary_data['problematic_players']) - limit} more.{fmt['END']}")
         print()

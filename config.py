@@ -2,10 +2,10 @@
 # DISCORD CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-DISCORD_USER_TOKEN = "YOUR_DISCORD_USER_TOKEN"  # Replace with actual token
+DISCORD_USER_TOKEN = "NjY4Nzk4NDI0MDU2ODU2NTg3.GsYF6f.X7ZaWfsJCEydN5zbzyXADDgquuZCJYFyz18EOc"  # Replace with actual token
 
 # Target channel ID for monitoring
-TARGET_CHANNEL_ID = 1315754807595761695
+TARGET_CHANNEL_ID = 1487309345246150666
 
 # Complaint/violation channel IDs for nickname cross-checking
 COMPLAINT_CHANNEL_IDS = [
@@ -34,14 +34,14 @@ MESSAGE_HISTORY_LIMIT = 70000
 # AUTHENTICATION
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-ADMIN_USERNAME = "USERNAME_HERE"  # Replace with actual username
-ADMIN_PASSWORD = "PASSWORD_HERE"  # Replace with actual password
+ADMIN_USERNAME = "WikiHampter"  # Replace with actual username
+ADMIN_PASSWORD = "XXXXXXXX"  # Replace with actual password
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # API CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-BASE_ADMIN_URL = "https://admin.deadspace14.net"
+BASE_ADMIN_URL = "https://admin.deadspace14.net/admin"
 ACCOUNT_URL = "https://account.spacestation14.com"
 
 OPERATION_TIMEOUT = 180

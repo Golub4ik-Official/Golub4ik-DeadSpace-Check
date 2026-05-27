@@ -1,15 +1,17 @@
 # DeadSpace14 Ban Evasion Detector
 
-DeadSpace14 Ban Evasion Detector is a Discord automation tool that links Discord telemetry with DeadSpace14 admin panel data to surface probable ban evasions in near real time. The project targets experienced server administrators who need reproducible evidence trails and automated triage of suspicious accounts.
+Инструмент для автоматизации Discord, который связывает телеметрию Discord с данными панели администратора DeadSpace14 для выявления вероятных обходов бана в near real time. Проект ориентирован на опытных администраторов серверов, которым нужны воспроизводимые цепочки доказательств и автоматическая триаж подозрительных аккаунтов.
 
-## Capabilities
+## Возможности
 
-- Multi-layer correlation across HWIDs, IPs, timestamps, and prior ban records with configurable confidence thresholds.
-- Automated Discord ingestion that parses "Arrived new player" events and complaint channels to build account graphs.
-- Structured output via JSON (`reports/scan_report.json`) and console logs for integration with downstream tooling.
-- Caching, concurrency control, and throttling tuned for high-volume community servers.
+- Многослойная корреляция по HWID, IP, временным меткам и предыдущим банам с настраиваемыми порогами уверенности.
+- Автоматический парсинг Discord — события "Arrived new player" и каналы жалоб для построения графа аккаунтов.
+- Структурированный вывод: JSON (`reports/scan_report.json`) и консольные логи для интеграции с внешними инструментами.
+- Кэширование, контроль конкурентности и троттлинг, оптимизированные для high-volume сообществ.
+- Адаптивный оптимизатор нагрузки с circuit breaker, exponential backoff и emergency mode.
+- Поиск по интервалу сообщений, массовая проверка ban bypass и исследование отдельных пользователей.
 
-## Quick Start
+## Быстрый старт
 
 ```bash
 git clone https://github.com/yourusername/deadspace14-ban-detector.git
@@ -17,53 +19,87 @@ cd deadspace14-ban-detector
 python -m venv .venv
 .venv\Scripts\activate  # PowerShell
 pip install -r requirements.txt
-copy config.py config_local.py  # optional override
-python main.py --check-ban-bypass
+copy config.py config_local.py  # опционально
+python main.py
 ```
 
-## Configuration
+## Конфигурация
 
-Runtime settings live in `config.py`. Override sensitive values before first execution.
+Основные настройки в `config.py`. Чувствительные данные переопределите перед первым запуском.
 
-| Key | Purpose |
+### Discord
+
+| Ключ | Назначение |
 | --- | --- |
-| `DISCORD_USER_TOKEN` | Discord token used for message scraping |
-| `TARGET_CHANNEL_ID` | Channel ID emitting new-player notices |
-| `COMPLAINT_CHANNEL_IDS` | Channels searched for nick-based complaints |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | DeadSpace14 admin credentials |
-| `MAX_CONCURRENT_REQUESTS` | Upper bound for parallel HTTP calls |
-| `CHECK_BAN_BYPASS` / `BAN_BYPASS_PAGES` | Ban-hit scraping behavior |
+| `DISCORD_USER_TOKEN` | Токен Discord для сканирования сообщений |
+| `TARGET_CHANNEL_ID` | ID канала с событиями новых игроков |
+| `COMPLAINT_CHANNEL_IDS` | ID каналов для поиска жалоб по никам |
+| `MESSAGE_HISTORY_LIMIT` | Лимит истории сообщений для каналов жалоб |
 
-Tune detection sensitivity with the `*_THRESHOLD_MINUTES` and `MESSAGE_LIMIT` values. Command-line overrides are available through `main.py --help`.
+### Авторизация
 
-## Execution Patterns
+| Ключ | Назначение |
+| --- | --- |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Учётные данные панели администратора DeadSpace14 |
 
-- Baseline monitoring: `python main.py`
-- Focused ban-bypass sweep: `python main.py --check-ban-bypass --ban-bypass-pages 10`
-- Single user investigation: `python main.py --username <nick>`
+### API
 
-All modes emit artifacts in `reports/` and populate `complaint_message_cache.json` for incremental scanning.
+| Ключ | Назначение |
+| --- | --- |
+| `BASE_ADMIN_URL` | URL панели администратора |
+| `ACCOUNT_URL` | URL SSO (account.spacestation14.com) |
+| `MAX_CONCURRENT_REQUESTS` | Максимум параллельных HTTP-вызовов |
+| `OPERATION_TIMEOUT` / `REQUEST_TIMEOUT` / `SEARCH_TIMEOUT` | Таймауты операций |
 
-## Architecture Overview
+### Сканирование
+
+| Ключ | Назначение |
+| --- | --- |
+| `MESSAGE_LIMIT` | Количество сообщений для сканирования |
+| `CHECK_BAN_BYPASS` / `BAN_BYPASS_PAGES` | Режим проверки ban bypass |
+| `MAX_TERMS_PER_SCAN` | Максимум терминов за одно сканирование |
+| `SEARCH_MAX_DEPTH` / `SEARCH_LIMIT_*` | Глубина и лимиты рекурсивного поиска |
+
+### Тайминги и уверенность
+
+Пороги `CLOSE_TIME_THRESHOLD_MINUTES`, `TIME_THRESHOLD_MINUTES`, `SUSPICIOUS_TIME_THRESHOLD_MINUTES` и `IP_MATCH_TIMEDELTA_MINUTES` управляют чувствительностью детекции.
+
+Уровни уверенности: `HWID_MATCH`, `IP_VERY_CLOSE_TIME`, `IP_CLOSE_TIME`, `IP_MODERATE_TIME`, `IP_DISTANT_TIME`, `IP_MATCH`, `NO_MATCH`.
+
+## Режимы запуска
+
+```bash
+python main.py                                    # Базовое сканирование сообщений
+python main.py --check-ban-bypass --ban-bypass-pages 10  # Проверка ban bypass
+python main.py --username <ник>                   # Исследование конкретного игрока
+```
+
+Все результаты сохраняются в `reports/` и кэшируются в `complaint_message_cache.json`.
+
+## Архитектура
 
 ```
-admin_panel.py            DeadSpace14 panel scraping
-bot.py                    Discord coordination layer
-core/scanner.py           Message ingestion and job queueing
-core/analyzer.py          Correlation engine and scoring
-services/*.py             API clients, caching, reporting
-models/*.py               Typed payload representations
-utils/*.py                Async, logging, and formatting helpers
+admin_panel.py              Скрапинг панели администратора DeadSpace14 (async, aiohttp, selectolax)
+bot.py                      Координационный слой Discord (discord.py-self)
+core/scanner.py             Загрузка сообщений, постановка задач в очередь, circuit breaker, backoff
+core/analyzer.py            Корреляция и слияние игроков по никнеймам
+services/admin_service.py   Клиент API администратора, кэширование, оптимизатор нагрузки
+services/cache_service.py   Персистентное кэширование жалоб (JSON)
+services/discord_service.py Работа с Discord, поиск по каналам жалоб
+services/reporting/         Генерация отчётов (консоль + JSON), форматирование
+models/                     Типизированные модели (Player, DiscordMessage, ScanResult, Verdict, Complaint)
+utils/                      Вспомогательные модули (async, logging, performance, URLs, embeds)
 ```
 
-The codebase is asyncio-first and leans on request batching with per-service rate guards. `services/reporting/formatter.py` shapes the JSON payloads consumed by downstream dashboards.
+Код асинхронный (asyncio), использует пакетную обработку запросов с per-service rate guards. `services/reporting/` отвечает за форматирование JSON и консольный вывод отчётов.
 
-## Operational Notes
+## Эксплуатационные заметки
 
-- Respect Discord and DeadSpace14 rate limits; reduce `MAX_CONCURRENT_REQUESTS` or increase `REQUEST_TIMEOUT` when throttled.
-- Persist configuration secrets outside of source control (`config_local.py`, environment variables, or secret managers).
-- Validate Discord permissions before first run; the detector assumes read access to configured channels.
+- Соблюдайте лимиты Discord и DeadSpace14; при троттлинге уменьшите `MAX_CONCURRENT_REQUESTS` или увеличьте `REQUEST_TIMEOUT`.
+- Храните секреты вне репозитория (`config_local.py`, переменные окружения, секрет-менеджеры).
+- Убедитесь в правах Discord на чтение целевых каналов перед запуском.
+- Конфигурация может загружаться из `.json`, `.yaml` или `.py` файлов (см. `config_system.py`).
 
-## License and Intent
+## Лицензия
 
-Distributed under the MIT License. Use is restricted to legitimate moderation and security workflows. The maintainers do not support harassment, privacy violations, or any activity that violates platform terms of service.
+MIT. Использование ограничено легитимными сценариями модерации и безопасности. Автор не поддерживает harassment, нарушение приватности или нарушение правил платформ.

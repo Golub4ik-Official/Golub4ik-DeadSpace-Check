@@ -15,8 +15,7 @@ class BanCheckerBot:
     def __init__(self, token: str, admin_panel, config: Dict[str, Any]) -> None:
         self.token = token
         self.config = config
-        intents = discord.Intents.default()
-        self.client = discord.Client(intents=intents)
+        self.client = discord.Client()
         self.discord_service = DiscordService(self.client)
         self.admin_service = AdminService(admin_panel)
         self.cache_service = CacheService()
@@ -96,4 +95,4 @@ class BanCheckerBot:
                 logging.error(f"Error closing Discord client: {e}", exc_info=True)
 
     def run(self):
-        self.client.run(self.token, bot=False)
+        self.client.run(self.token)

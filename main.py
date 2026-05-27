@@ -1,3 +1,4 @@
+import argparse
 import logging
 import sys
 
@@ -7,10 +8,25 @@ from config_system import initialize, get_config
 from utils.logging_utils import setup_logging
 
 # ─── 1) MAIN-SPECIFIED VALUES (HIGHEST PRIORITY) ────────────────────────────
-MESSAGE_LIMIT = 700
-USERNAME = None
-CHECK_BAN_BYPASS = False
-BAN_BYPASS_PAGES = 1
+parser = argparse.ArgumentParser(description="Ban Checker Bot")
+parser.add_argument("--username", type=str, default=None,
+                    help="Scan reports for a specific player nickname")
+parser.add_argument("--messages", type=int, default=None,
+                    help="Number of messages to scan")
+parser.add_argument("--check-ban-bypass", action="store_true", default=None,
+                    help="Check ban bypass")
+parser.add_argument("--ban-bypass-pages", type=int, default=None,
+                    help="Ban bypass pages")
+parser.add_argument("--log-level", type=str, default=None,
+                    help="Logging level (DEBUG, INFO, WARNING, ERROR)")
+parser.add_argument("--config", type=str, default="config.py",
+                    help="Path to config file")
+args = parser.parse_args()
+
+MESSAGE_LIMIT = args.messages if args.messages is not None else 700
+USERNAME = args.username
+CHECK_BAN_BYPASS = bool(args.check_ban_bypass) if args.check_ban_bypass is not None else False
+BAN_BYPASS_PAGES = args.ban_bypass_pages if args.ban_bypass_pages is not None else 1
 
 MESSAGE_INTERVAL_START = None
 MESSAGE_INTERVAL_END = None
@@ -24,8 +40,8 @@ SEARCH_LIMIT_LEVEL1 = None
 SEARCH_LIMIT_LEVEL2 = None
 SEARCH_LIMIT_DEFAULT = None
 
-LOG_LEVEL = None
-CONFIG_FILE = "config.py"
+LOG_LEVEL = args.log_level
+CONFIG_FILE = args.config
 # ────────────────────────────────────────────────────────────────────────────────
 
 def main():

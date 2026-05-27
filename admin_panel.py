@@ -74,7 +74,7 @@ class AdminPanel:
 
         self.DEFAULT_PER_PAGE = 2000
 
-        self._connector = aiohttp.TCPConnector(limit_per_host=10, limit=50, ssl=False)
+        self._connector = None
         self._client_session: Optional[aiohttp.ClientSession] = None
 
         self.login_attempts = 0
@@ -195,6 +195,8 @@ class AdminPanel:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._client_session is None or self._client_session.closed:
+            if self._connector is None or self._connector.closed:
+                self._connector = aiohttp.TCPConnector(limit_per_host=10, limit=50, ssl=False)
             self._client_session = aiohttp.ClientSession(
                 connector=self._connector,
                 timeout=self.TIMEOUT,

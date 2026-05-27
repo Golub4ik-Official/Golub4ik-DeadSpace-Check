@@ -1,3 +1,4 @@
+import io
 import logging
 import os
 import sys
@@ -5,6 +6,23 @@ import time
 from collections import defaultdict
 from logging.handlers import RotatingFileHandler
 from typing import Optional, Dict, Any
+
+
+class SafeStream:
+    def __init__(self, stream):
+        self.stream = stream
+
+    def write(self, s):
+        try:
+            self.stream.write(s)
+        except UnicodeEncodeError:
+            self.stream.write(s.encode(self.stream.encoding or 'utf-8', errors='replace').decode(self.stream.encoding or 'utf-8'))
+
+    def flush(self):
+        self.stream.flush()
+
+    def __getattr__(self, attr):
+        return getattr(self.stream, attr)
 
 
 class CustomFormatter(logging.Formatter):
@@ -162,7 +180,7 @@ def setup_logging(
         log_format = f"{log_format} | {context_format}"
     date_format = "%Y-%m-%d %H:%M:%S"
 
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(SafeStream(sys.stdout))
     console_formatter = CustomFormatter(log_format, date_format, use_colors, compact_output)
     console_handler.setFormatter(console_formatter)
 
@@ -194,7 +212,7 @@ def setup_logging(
     summary_logger.setLevel(logging.INFO)
     summary_logger.propagate = False
 
-    summary_handler = logging.StreamHandler(sys.stdout)
+    summary_handler = logging.StreamHandler(SafeStream(sys.stdout))
     summary_formatter = CustomFormatter(
         "%(asctime)s | %(levelname)-8s | %(message)s",
         date_format, use_colors, compact_output

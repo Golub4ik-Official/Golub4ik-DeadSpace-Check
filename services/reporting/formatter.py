@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 from services.reporting.config import (
-    ReportConfig, TERMINAL_FORMATTING, BOX_CHARS,
+    ReportConfig, TERMINAL_FORMATTING, BOX_CHARS, ASCII_BOX_CHARS,
     SEVERITY_LEVELS, CONFIDENCE_LEVELS, DEFAULT_REPORT_CONFIG,
     LAYOUT_CONFIG
 )
@@ -15,8 +15,20 @@ class ReportFormatter:
     def __init__(self, config: Optional[ReportConfig] = None):
         self.config = config or ReportConfig()
         self.fmt = self._setup_terminal_formatting()
-        self.box = BOX_CHARS.copy()
+        self.box = self._get_box_chars()
         self.timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _get_box_chars():
+        try:
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            encoding = sys.stdout.encoding or 'utf-8'
+            test_char = BOX_CHARS['H']
+            test_char.encode(encoding, errors='strict')
+            return BOX_CHARS.copy()
+        except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
+            return ASCII_BOX_CHARS.copy()
 
     def _get_fmt(self, main_key: str, *modifier_keys: str, default: str = '') -> str:
         main_key_upper = main_key.upper()
