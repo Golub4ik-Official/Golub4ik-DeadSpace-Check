@@ -8,6 +8,11 @@ gui_settings.json
 .idea/*
 __pycache__/*
 
+# PyInstaller
+build/
+dist/
+*.spec
+
 core/__pycache__/*
 models/__pycache__/*
 utils/__pycache__/*
