@@ -15,14 +15,7 @@
 
 ### Вариант 1 — Готовый EXE (Python не нужен)
 
-```
-pip install pyinstaller
-pyinstaller DeadSpaceChecker.spec --noconfirm
-```
-
-Готовый файл появится в `dist/DeadSpaceChecker.exe`. Можно перенести куда угодно — при запуске он сам создаст `gui_settings.json` и папку `reports/`.
-
-**Уже собранный EXE** лежит в `dist/DeadSpaceChecker.exe` — просто запусти.
+Скачай последнюю версию в разделе **Releases** этого репозитория — там лежит собранный `DeadSpaceChecker.exe`. Просто запусти, при первом старте он сам создаст `gui_settings.json` и папку `reports/`.
 
 ### Вариант 2 — Из исходников (с Python)
 
