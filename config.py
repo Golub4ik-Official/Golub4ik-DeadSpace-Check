@@ -2,7 +2,7 @@
 # DISCORD CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-DISCORD_USER_TOKEN = "NjY4Nzk4NDI0MDU2ODU2NTg3.GsYF6f.X7ZaWfsJCEydN5zbzyXADDgquuZCJYFyz18EOc"  # Replace with actual token
+DISCORD_USER_TOKEN = "XXXXXXXXXXXX"  # Replace with actual token
 
 # Target channel ID for monitoring
 TARGET_CHANNEL_ID = 1487309345246150666

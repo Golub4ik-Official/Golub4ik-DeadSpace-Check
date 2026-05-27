@@ -3,6 +3,7 @@ scan_report_*.json
 config_*.py
 complaint_message_cache.json.bak
 complaint_message_cache.json
+gui_settings.json
 .idea/*
 __pycache__/*
 
