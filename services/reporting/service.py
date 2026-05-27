@@ -107,7 +107,7 @@ class ReportService:
         self.print_message_scan_results(scan_results)
         return report_data
 
-    def generate_nickname_search_report(self, nickname: str, player: Player) -> List[Dict[str, Any]]:
+    def generate_nickname_search_report(self, nickname: str, player: Player, gui_mode: bool = False) -> List[Dict[str, Any]]:
         report_data = []
         player_info = {
             "type": "player_info", "nickname": nickname,
@@ -130,7 +130,7 @@ class ReportService:
         if hasattr(player, 'complaint_links') and player.complaint_links:
             report_data.append({"type": "complaints", "links": player.complaint_links})
 
-        self._print_nickname_search_results(nickname, player)
+        self._print_nickname_search_results(nickname, player, gui_mode=gui_mode)
         return report_data
 
     def _generate_ip_data(self, nickname: str, player: Player) -> Dict[str, Any]:
@@ -178,16 +178,18 @@ class ReportService:
     def _get_indent_str(self, level: int = 1) -> str:
         return LAYOUT_CONFIG['DEFAULT_INDENT_STRING'] * level
 
-    def _print_nickname_search_results(self, nickname: str, player: Player) -> None:
+    def _print_nickname_search_results(self, nickname: str, player: Player, gui_mode: bool = False) -> None:
         fmt = self.formatter.fmt
         content_indent = self._get_indent_str(1)
 
-        self.formatter.print_header(f"SCAN RESULTS FOR: {fmt['BRIGHT_YELLOW_BOLD']}{nickname}{fmt['END']}", width=self.config.box_width_large)
+        self.formatter.print_header(f"РЕЗУЛЬТАТЫ ПОИСКА ДЛЯ: {fmt['BRIGHT_YELLOW_BOLD']}{nickname}{fmt['END']}", width=self.config.box_width_large)
 
         status_str = self.formatter.format_status(getattr(player,'status', 'unknown'), getattr(player, 'hwid_erased', False))
         ban_counts = getattr(player, 'ban_counts', 0)
-        print(f"{content_indent}{fmt['WHITE_BOLD']}STATUS:{fmt['END']} {status_str} {fmt['GRAY']}|{fmt['END']} {fmt['WHITE_BOLD']}BANS:{fmt['END']} {self.formatter.format_count(ban_counts)}")
+        print(f"{content_indent}{fmt['WHITE_BOLD']}Статус:{fmt['END']} {status_str} {fmt['GRAY']}|{fmt['END']} {fmt['WHITE_BOLD']}Наказаний:{fmt['END']} {self.formatter.format_count(ban_counts)}")
 
+        if gui_mode:
+            return
 
         if hasattr(player, 'ban_reasons') and player.ban_reasons:
             self._print_ban_reasons(player, base_indent_str=content_indent)
@@ -273,7 +275,7 @@ class ReportService:
         if not total_associated_nicks and not categorized["confirmed_alts"]["accounts"] : return
 
         box_v_char_colored, end_box = self._print_section_box_start(
-            f"ASSOCIATED NICKNAMES (Primary: {nickname})",
+            f"СВЯЗАННЫЕ НИКНЕЙМЫ (Основной: {nickname})",
             base_indent_str, box_width, title_color_keys=('BRIGHT_YELLOW', 'BOLD'), box_char_set='SINGLE'
         )
         
@@ -289,7 +291,7 @@ class ReportService:
         list_display_limit = self.config.get_specific_display_limit('NICKNAME_DISPLAY_LIMIT')
 
         if categorized["confirmed_alts"]["accounts"]:
-            print_cat_header(f"CONFIRMED ALTS (Linked directly to {nickname})", ('RED', 'BOLD'))
+            print_cat_header(f"ПОДТВЕРЖДЁННЫЕ АЛЬТЫ (Напрямую связаны с {nickname})", ('RED', 'BOLD'))
             self.formatter.print_line_in_box(
                 f"{sub_item_indent_str}{fmt['WHITE_BOLD']}Accounts ({len(categorized['confirmed_alts']['accounts'])}):{fmt['END']} "
                 f"{self.formatter.truncate_list([fmt['WHITE'] + acc + fmt['END'] for acc in categorized['confirmed_alts']['accounts']], list_display_limit)}",
@@ -348,7 +350,7 @@ class ReportService:
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
         if categorized["likely_connections"]:
-            print_cat_header(f"LIKELY CONNECTIONS (Linked via alts of {nickname})", ('YELLOW',))
+            print_cat_header(f"ВЕРОЯТНЫЕ СВЯЗИ (Через альтов {nickname})", ('YELLOW',))
             for conn in categorized["likely_connections"][:list_display_limit]:
                 evidence_parts = []
                 if conn['id_details']['hwid'] > 0:
@@ -369,7 +371,7 @@ class ReportService:
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
         if categorized["possible_connections"]["ip"] or categorized["possible_connections"]["login"]:
-            print_cat_header(f"POSSIBLE CONNECTIONS (Directly with {nickname})", ('CYAN',))
+            print_cat_header(f"ВОЗМОЖНЫЕ СВЯЗИ (Напрямую с {nickname})", ('CYAN',))
             if categorized["possible_connections"]["login"]:
                  logins = list(categorized['possible_connections']['login'])
                  self.formatter.print_line_in_box(
@@ -401,7 +403,7 @@ class ReportService:
         
         time_based_nicks = categorized["time_based"]["recent"] + categorized["time_based"]["historical"]
         if time_based_nicks:
-            print_cat_header("TIME-BASED ASSOCIATIONS (From Denied Logins)", ("GRAY", "BOLD"))
+            print_cat_header("ВРЕМЕННЫЕ СВЯЗИ (Из отклонённых входов)", ("GRAY", "BOLD"))
             if categorized["time_based"]["recent"]:
                  self.formatter.print_line_in_box(
                      f"{sub_item_indent_str}{fmt['WHITE_BOLD']}Recent:{fmt['END']} "
@@ -417,7 +419,7 @@ class ReportService:
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
         if categorized["other"]:
-             print_cat_header("OTHER KNOWN NICKNAMES (Source unclear/weaker link)", ('GRAY', 'BOLD'))
+             print_cat_header("ДРУГИЕ НИКНЕЙМЫ (Слабые/неясные связи)", ('GRAY', 'BOLD'))
              self.formatter.print_line_in_box(
                  f"{sub_item_indent_str}{self.formatter.truncate_list([fmt['WHITE'] + o + fmt['END'] for o in list(categorized['other'])], list_display_limit)}",
                  box_v_char_colored, base_indent_str, line_padding_in_box
@@ -428,57 +430,55 @@ class ReportService:
     def _print_ban_reasons(self, player: Player, base_indent_str: str) -> None:
         if not hasattr(player, 'ban_reasons') or not player.ban_reasons: return
 
-        box_width = self.config.box_width_medium 
-        item_indent_str = self._get_indent_str(1)
+        box_width = self.config.box_width_medium - 10
+        indent_str = self._get_indent_str(1)
         fmt = self.formatter.fmt
-        
-        self.formatter.print_section_header(
-            f"BAN REASONS ({len(player.ban_reasons)})", 
-            indent_str=base_indent_str, width=box_width, style='warning'
-        )
-        v_char_content_box_colored = f"{self.formatter._get_fmt('BOLD')}{self.formatter.box['V']}{self.formatter.fmt['END']}"
-        self.formatter.print_content_box_start(width=box_width, indent_str=base_indent_str)
-        
+        primary_nick = getattr(player, 'primary_nickname', player.nicknames[0] if player.nicknames else 'Unknown')
         limit = self.config.get_specific_display_limit('BAN_REASON_DISPLAY_LIMIT')
-        
-        line_padding_in_box = 1 
-        content_area_width = box_width - 2 - (line_padding_in_box * 2)
-        
+
         for i, ban_info in enumerate(player.ban_reasons[:limit]):
-            reason_text, user_text_colored = "", ""
+            reason_text = ""
+            admin_name = "N/A"
             if isinstance(ban_info, dict) and "reason" in ban_info:
                 reason_text = ban_info["reason"]
-                user_text_colored = f"User: {self.formatter._get_fmt('BRIGHT_BLUE')}{ban_info.get('username', 'N/A')}{self.formatter.fmt['END']}"
+                admin_name = ban_info.get("username", "N/A")
             else:
                 reason_text = str(ban_info)
 
-            header_line = f"{self.formatter._get_fmt('WHITE_BOLD')}{i+1}.{self.formatter.fmt['END']}"
-            if user_text_colored: header_line += f" {user_text_colored}"
-            
-            self.formatter.print_line_in_box(f"{item_indent_str}{header_line}", v_char_content_box_colored, base_indent_str, line_padding_in_box)
-            
-            reason_display_indent = item_indent_str + LAYOUT_CONFIG['DEFAULT_INDENT_STRING']
-            effective_text_width = content_area_width - len(reason_display_indent)
-            if effective_text_width < 10: effective_text_width = 10
-            
-            wrapped_lines = self.formatter.get_wrapped_lines(reason_text, effective_text_width, 
-                                                             initial_indent="", subsequent_indent="")
-            for line_idx, line in enumerate(wrapped_lines):
-                self.formatter.print_line_in_box(f"{reason_display_indent}{fmt['WHITE']}{line}{fmt['END']}", v_char_content_box_colored, base_indent_str, line_padding_in_box)
+            block_title = f"НАКАЗАНИЕ #{i+1}"
+            box_v, end_box = self._print_section_box_start(
+                block_title, base_indent_str, box_width,
+                title_color_keys=('RED', 'BOLD'), box_char_set='SINGLE'
+            )
+            line_pad = 1
 
+            self.formatter.print_key_value_in_box(
+                "Игрок", primary_nick, box_v, base_indent_str,
+                key_width=14, key_color_keys=('WHITE', 'BOLD'),
+                value_color_keys=('WHITE',), line_padding=line_pad
+            )
+            status_str = self.formatter.format_status(getattr(player, 'status', 'unknown'))
+            self.formatter.print_line_in_box(
+                f"{indent_str}{fmt['WHITE_BOLD']}{'Статус:':<16}{fmt['END']} {status_str}",
+                box_v, base_indent_str, line_pad
+            )
+            self.formatter.print_key_value_in_box(
+                "Причина", reason_text, box_v, base_indent_str,
+                key_width=14, key_color_keys=('WHITE', 'BOLD'),
+                value_color_keys=('YELLOW',), line_padding=line_pad
+            )
+            self.formatter.print_key_value_in_box(
+                "Выдал", admin_name, box_v, base_indent_str,
+                key_width=14, key_color_keys=('WHITE', 'BOLD'),
+                value_color_keys=('BRIGHT_BLUE',), line_padding=line_pad
+            )
 
-            if i < limit - 1 and i < len(player.ban_reasons) -1 :
-                sep_len = content_area_width - len(item_indent_str)
-                if sep_len < 0: sep_len = 0
-                sep_line = self.formatter.box['H'] * sep_len
-                self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter._get_fmt('GRAY')}{sep_line}{self.formatter.fmt['END']}", 
-                                                 v_char_content_box_colored, base_indent_str, line_padding_in_box)
+            end_box()
+            print()
 
         if len(player.ban_reasons) > limit:
-            self.formatter.print_line_in_box(f"{item_indent_str}{self.formatter.box['BULLET']} {fmt['GRAY']}... and {len(player.ban_reasons) - limit} more ban reasons{fmt['END']}",
-                                            v_char_content_box_colored, base_indent_str, line_padding_in_box)
-
-        self.formatter.print_content_box_end(width=box_width, indent_str=base_indent_str)
+            print(f"{base_indent_str}{fmt['GRAY']}... и ещё {len(player.ban_reasons) - limit} наказаний{fmt['END']}")
+            print()
 
 
     def _print_connection_paths_section(self, player: Player, nickname: str, base_indent_str: str) -> None:
@@ -492,7 +492,7 @@ class ReportService:
         fmt = self.formatter.fmt
         
         box_v_char_colored, end_box = self._print_section_box_start(
-            "CONNECTION EVIDENCE (Paths to Known Alts)", 
+            "СВЯЗИ (Пути к известным альтам)", 
             base_indent_str, box_width, title_color_keys=('BRIGHT_YELLOW', 'BOLD'), box_char_set='SINGLE'
         )
         line_padding_in_box = 1
@@ -631,7 +631,7 @@ class ReportService:
         item_indent_str = self._get_indent_str(1)
 
         box_v_char_colored, end_box = self._print_section_box_start(
-            f"COMPLAINTS ({total_complaints_to_display})", 
+            f"ЖАЛОБЫ ({total_complaints_to_display})", 
             base_indent_str, box_width, title_color_keys=('BRIGHT_RED', 'BOLD'), box_char_set='SINGLE'
         )
         
@@ -734,7 +734,7 @@ class ReportService:
         fmt = self.formatter.fmt
 
         box_v_char_colored, end_box = self._print_section_box_start(
-            f"ASSOCIATED IPs ({total_ips})", base_indent_str, box_width, 
+            f"СВЯЗАННЫЕ IP ({total_ips})", base_indent_str, box_width, 
             title_color_keys=('BRIGHT_CYAN', 'BOLD'), box_char_set='SINGLE'
             )
         line_padding_in_box = 1
@@ -752,9 +752,9 @@ class ReportService:
                                                  box_v_char_colored, base_indent_str, line_padding_in_box)
             self.formatter.print_line_in_box("", box_v_char_colored, base_indent_str, line_padding_in_box)
 
-        self._print_ip_hwid_list(f"SHARED IPs - Used by {nickname} and others", shared_ips, lambda x: self.formatter._get_fmt('BRIGHT_CYAN') + x + self.formatter.fmt['END'], nickname, box_v_char_colored, base_indent_str, item_indent_str, 'IP_OWNED_DISPLAY_LIMIT', ('YELLOW','BOLD'), player_obj_for_nicks=player)
-        self._print_ip_hwid_list(f"ALT ACCOUNT IPs - Used by {nickname}'s alts", alt_shared_ips, lambda x: self.formatter._get_fmt('BRIGHT_CYAN') + x + self.formatter.fmt['END'], nickname, box_v_char_colored, base_indent_str, item_indent_str, 'IP_ALT_DISPLAY_LIMIT', ('YELLOW','BOLD'), player_obj_for_nicks=player)
-        self._print_ip_hwid_list(f"OTHER SHARED IPs - Not {nickname} or alts", multi_user_ips, lambda x: self.formatter._get_fmt('BRIGHT_CYAN') + x + self.formatter.fmt['END'], nickname, box_v_char_colored, base_indent_str, item_indent_str, 'IP_OTHER_DISPLAY_LIMIT', ('GRAY','BOLD'), player_obj_for_nicks=player)
+        self._print_ip_hwid_list(f"ОБЩИЕ IP - {nickname} и другие", shared_ips, lambda x: self.formatter._get_fmt('BRIGHT_CYAN') + x + self.formatter.fmt['END'], nickname, box_v_char_colored, base_indent_str, item_indent_str, 'IP_OWNED_DISPLAY_LIMIT', ('YELLOW','BOLD'), player_obj_for_nicks=player)
+        self._print_ip_hwid_list(f"IP АЛЬТОВ - Использованы альтами {nickname}", alt_shared_ips, lambda x: self.formatter._get_fmt('BRIGHT_CYAN') + x + self.formatter.fmt['END'], nickname, box_v_char_colored, base_indent_str, item_indent_str, 'IP_ALT_DISPLAY_LIMIT', ('YELLOW','BOLD'), player_obj_for_nicks=player)
+        self._print_ip_hwid_list(f"ДРУГИЕ IP - Не {nickname} и не альты", multi_user_ips, lambda x: self.formatter._get_fmt('BRIGHT_CYAN') + x + self.formatter.fmt['END'], nickname, box_v_char_colored, base_indent_str, item_indent_str, 'IP_OTHER_DISPLAY_LIMIT', ('GRAY','BOLD'), player_obj_for_nicks=player)
         end_box()
 
     def _print_hwid_section(self, player: Player, nickname: str, base_indent_str: str) -> None:
@@ -766,13 +766,13 @@ class ReportService:
         box_width = self.config.box_width_medium
         item_indent_str = self._get_indent_str(1)
         box_v_char_colored, end_box = self._print_section_box_start(
-            f"ASSOCIATED HWIDs ({total_hwids})", base_indent_str, box_width,
+            f"СВЯЗАННЫЕ HWID ({total_hwids})", base_indent_str, box_width,
             title_color_keys=('BRIGHT_CYAN', 'BOLD'), box_char_set='SINGLE'
             )
         
-        self._print_ip_hwid_list(f"PRIMARY HWIDs - Used by {nickname}", owned_hwids, self.formatter.format_hwid, nickname, box_v_char_colored, base_indent_str, item_indent_str, 'HWID_OWNED_DISPLAY_LIMIT', ('GREEN','BOLD'), show_only_user_if_single=True, player_obj_for_nicks=player)
-        self._print_ip_hwid_list(f"ALT ACCOUNT HWIDs - Used by {nickname}'s alts", alt_hwids, self.formatter.format_hwid, nickname, box_v_char_colored, base_indent_str, item_indent_str, 'HWID_ALT_DISPLAY_LIMIT', ('YELLOW','BOLD'), player_obj_for_nicks=player)
-        self._print_ip_hwid_list(f"OTHER HWIDs - Not {nickname} or alts", other_hwids, self.formatter.format_hwid, nickname, box_v_char_colored, base_indent_str, item_indent_str, 'HWID_OTHER_DISPLAY_LIMIT', ('GRAY','BOLD'), player_obj_for_nicks=player)
+        self._print_ip_hwid_list(f"ОСНОВНЫЕ HWID - Использованы {nickname}", owned_hwids, self.formatter.format_hwid, nickname, box_v_char_colored, base_indent_str, item_indent_str, 'HWID_OWNED_DISPLAY_LIMIT', ('GREEN','BOLD'), show_only_user_if_single=True, player_obj_for_nicks=player)
+        self._print_ip_hwid_list(f"HWID АЛЬТОВ - Использованы альтами {nickname}", alt_hwids, self.formatter.format_hwid, nickname, box_v_char_colored, base_indent_str, item_indent_str, 'HWID_ALT_DISPLAY_LIMIT', ('YELLOW','BOLD'), player_obj_for_nicks=player)
+        self._print_ip_hwid_list(f"ДРУГИЕ HWID - Не {nickname} и не альты", other_hwids, self.formatter.format_hwid, nickname, box_v_char_colored, base_indent_str, item_indent_str, 'HWID_OTHER_DISPLAY_LIMIT', ('GRAY','BOLD'), player_obj_for_nicks=player)
         end_box()
 
     def _print_denied_logins_section(self, player: Player, nickname: str, base_indent_str: str) -> None:
@@ -785,7 +785,7 @@ class ReportService:
         fmt = self.formatter.fmt
 
         box_v_char_colored, end_box = self._print_section_box_start(
-            f"DENIED LOGIN ATTEMPTS ({len(player.denied_logins)})", 
+            f"ОТКЛОНЁННЫЕ ВХОДЫ ({len(player.denied_logins)})", 
             base_indent_str, box_width, title_color_keys=('BRIGHT_RED', 'BOLD'), box_char_set='SINGLE'
         )
         

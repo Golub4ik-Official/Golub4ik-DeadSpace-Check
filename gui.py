@@ -5,7 +5,7 @@ import queue
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog
 import json
 import os
 import re
@@ -21,7 +21,21 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(ROOT_DIR, "gui_settings.json")
 CONFIG_FILE = os.path.join(ROOT_DIR, "config.py")
 
-ANSI_RE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+ANSI_RE = re.compile(r'\x1b\[[\d;]*[a-zA-Z]')
+
+ANSI_TAG_MAP = {
+    '0': '_reset',
+    '1': 'bold',
+    '4': 'underline',
+    '90': 'gray',
+    '91': 'red',
+    '92': 'green',
+    '93': 'yellow',
+    '94': 'blue',
+    '95': 'magenta',
+    '96': 'cyan',
+    '97': 'white',
+}
 
 
 def _read_config_raw():
@@ -108,7 +122,7 @@ class QueueLogHandler(logging.Handler):
 
     def emit(self, record):
         try:
-            self.out_queue.put(self.format(record) + "\n")
+            self.out_queue.put({"type": "log", "text": self.format(record) + "\n"})
         except Exception:
             pass
 
@@ -124,6 +138,13 @@ class QueueStream:
     def flush(self):
         pass
 
+    def isatty(self):
+        return False
+
+    @property
+    def encoding(self):
+        return "utf-8"
+
 
 class BanCheckerGUI:
     def __init__(self, root):
@@ -138,11 +159,73 @@ class BanCheckerGUI:
         self.running = False
         self.output_queue = queue.Queue()
 
+        self._setup_color_tags()
         self._build_ui()
         self._apply_settings()
         self._poll_output()
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _setup_color_tags(self):
+        tag_cfg = {
+            'red': ('#f07178', 'normal'),
+            'green': ('#c3e88d', 'normal'),
+            'yellow': ('#ffcb6b', 'normal'),
+            'blue': ('#82aaff', 'normal'),
+            'magenta': ('#c792ea', 'normal'),
+            'cyan': ('#89ddff', 'normal'),
+            'white': ('#eeffff', 'normal'),
+            'gray': ('#546e7a', 'normal'),
+            'bold_red': ('#f07178', 'bold'),
+            'bold_green': ('#c3e88d', 'bold'),
+            'bold_yellow': ('#ffcb6b', 'bold'),
+            'bold_blue': ('#82aaff', 'bold'),
+            'bold_magenta': ('#c792ea', 'bold'),
+            'bold_cyan': ('#89ddff', 'bold'),
+            'bold_white': ('#ffffff', 'bold'),
+            'bold': ('#eeffff', 'bold'),
+            'underline': ('#eeffff', 'normal'),
+        }
+        self._tags = {}
+        for name, (fg, weight) in tag_cfg.items():
+            opts = {'foreground': fg}
+            if weight == 'bold':
+                opts['font'] = ("Consolas", 9, "bold")
+            if name == 'underline':
+                opts['underline'] = True
+            self._tags[name] = opts
+
+    def _ensure_tag(self, name):
+        if name not in self.output_text.tag_names():
+            opts = self._tags.get(name, {})
+            if opts:
+                self.output_text.tag_config(name, **opts)
+
+    def _insert_colored(self, text):
+        parts = re.split(r'(\x1b\[[\d;]*m)', text)
+        active_tags = []
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith('\x1b[') and part.endswith('m'):
+                code = part[2:-1]
+                if not code or code == '0':
+                    active_tags = []
+                else:
+                    codes = code.split(';')
+                    for c in codes:
+                        tag = ANSI_TAG_MAP.get(c)
+                        if tag == '_reset':
+                            active_tags = []
+                        elif tag and tag not in active_tags:
+                            active_tags.append(tag)
+            else:
+                for t in active_tags:
+                    self._ensure_tag(t)
+                if active_tags:
+                    self.output_text.insert(tk.END, part, tuple(active_tags))
+                else:
+                    self.output_text.insert(tk.END, part)
 
     def _load_settings(self):
         if os.path.exists(SETTINGS_FILE):
@@ -171,7 +254,7 @@ class BanCheckerGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main.columnconfigure(0, weight=1)
-        main.rowconfigure(3, weight=1)
+        main.rowconfigure(4, weight=1)
 
         cred = ttk.LabelFrame(main, text="Настройки доступа", padding="10")
         cred.grid(row=0, column=0, sticky="ew", pady=(0, 8))
@@ -182,14 +265,14 @@ class BanCheckerGUI:
         self.token_var = tk.StringVar()
         self.show_secrets = tk.BooleanVar(value=False)
 
-        ttk.Label(cred, text="ADMIN_USERNAME:").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(cred, text="Имя администратора:").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=2)
         ttk.Entry(cred, textvariable=self.username_var).grid(row=0, column=1, sticky="ew", pady=2)
 
-        ttk.Label(cred, text="ADMIN_PASSWORD:").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(cred, text="Пароль администратора:").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=2)
         self.pw_entry = ttk.Entry(cred, textvariable=self.password_var, show="*")
         self.pw_entry.grid(row=1, column=1, sticky="ew", pady=2)
 
-        ttk.Label(cred, text="DISCORD_TOKEN:").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=2)
+        ttk.Label(cred, text="Токен Discord:").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=2)
         token_frame = ttk.Frame(cred)
         token_frame.grid(row=2, column=1, sticky="ew", pady=2)
         token_frame.columnconfigure(0, weight=1)
@@ -238,7 +321,7 @@ class BanCheckerGUI:
         ttk.Entry(params, textvariable=self.bypass_pages_var, width=8).grid(row=0, column=3, sticky="w")
 
         actions = ttk.Frame(main)
-        actions.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        actions.grid(row=2, column=0, sticky="ew", pady=(0, 4))
         self.start_btn = ttk.Button(actions, text="▶ Запуск", command=self._on_start)
         self.start_btn.pack(side="left", padx=(0, 8))
         self.stop_btn = ttk.Button(actions, text="■ Остановить", command=self._on_stop, state="disabled")
@@ -246,8 +329,21 @@ class BanCheckerGUI:
         self.config_btn = ttk.Button(actions, text="⚙️", width=3, command=self._open_config_dialog)
         self.config_btn.pack(side="left", padx=(8, 0))
 
-        out = ttk.LabelFrame(main, text="Вывод", padding="4")
-        out.grid(row=3, column=0, sticky="nsew")
+        progress_frame = ttk.LabelFrame(main, text="Прогресс", padding="4")
+        progress_frame.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        progress_frame.columnconfigure(1, weight=1)
+
+        self.progress_var = tk.IntVar(value=0)
+        self.progress_bar = ttk.Progressbar(
+            progress_frame, mode="determinate",
+            variable=self.progress_var, length=200
+        )
+        self.progress_bar.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        self.progress_label = ttk.Label(progress_frame, text="")
+        self.progress_label.grid(row=0, column=1, sticky="w")
+
+        out = ttk.LabelFrame(main, text="Результаты", padding="4")
+        out.grid(row=4, column=0, sticky="nsew")
         out.columnconfigure(0, weight=1)
         out.rowconfigure(0, weight=1)
 
@@ -256,8 +352,8 @@ class BanCheckerGUI:
             bg="#1e1e1e", fg="#d4d4d4", insertbackground="white",
         )
         self.output_text.grid(row=0, column=0, sticky="nsew")
-        self.output_text.bind("<Control-c>", self._copy_selection)
-        self.output_text.bind("<Control-C>", self._copy_selection)
+        self.output_text.bind("<Control-KeyPress>", self._on_ctrl_key)
+        self.root.bind_class("Entry", "<Control-KeyPress>", self._on_entry_ctrl_key)
 
         self._on_mode_change()
 
@@ -314,6 +410,8 @@ class BanCheckerGUI:
             return
 
         self.output_text.delete("1.0", tk.END)
+        self.progress_var.set(0)
+        self.progress_label.config(text="")
         self._log("▶ Запуск сканирования...\n")
 
         self.start_btn.config(state="disabled")
@@ -381,9 +479,14 @@ class BanCheckerGUI:
                 "message_interval_end": None,
             }
 
-            bot = BanCheckerBot(cfg.discord.discord_user_token, admin_panel, bot_config)
+            bot = BanCheckerBot(cfg.discord.discord_user_token, admin_panel, bot_config,
+                               progress_queue=self.output_queue)
             self.bot = bot
-            self.bot_loop = bot.client.loop
+            try:
+                self.bot_loop = bot.client.loop
+            except AttributeError:
+                self.bot_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self.bot_loop)
 
             bot.run()
 
@@ -398,44 +501,555 @@ class BanCheckerGUI:
             self.output_queue.put(f"\n{'─'*50}\nПроцесс завершён\n")
             self.output_queue.put("__DONE__")
 
+    def _copy_to_clipboard(self, text):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    def _add_section_embed(self, title, accent_color, fields, copy_text=None):
+        outer = tk.Frame(self.output_text, bg='#252526', bd=1, relief='solid',
+                         highlightbackground='#3a3a3a', padx=0, pady=0)
+        accent = tk.Frame(outer, bg=accent_color, width=4)
+        accent.pack(side='left', fill='y')
+        content = tk.Frame(outer, bg='#252526', padx=10, pady=6)
+        content.pack(side='left', fill='x', expand=True)
+
+        title_row = tk.Frame(content, bg='#252526')
+        title_row.pack(fill='x')
+        tk.Label(title_row, text=title,
+                 font=('Consolas', 10, 'bold'), fg=accent_color, bg='#252526').pack(side='left')
+        if copy_text:
+            tk.Button(title_row, text='📋', font=('Consolas', 9),
+                      command=lambda t=copy_text: self._copy_to_clipboard(t),
+                      bg='#333333', fg='#eeffff', bd=0, padx=4, cursor='hand2',
+                      activebackground='#444444').pack(side='right')
+
+        tk.Frame(content, bg='#3a3a3a', height=1).pack(fill='x', pady=4)
+
+        for label, value, val_color in fields:
+            row = tk.Frame(content, bg='#252526')
+            row.pack(fill='x', pady=1)
+            tk.Label(row, text=label + ':', font=('Consolas', 9, 'bold'),
+                     fg='#969696', bg='#252526', width=14, anchor='w').pack(side='left')
+            lbl = tk.Label(row, text=str(value), font=('Consolas', 9),
+                           fg=val_color, bg='#252526', anchor='w', wraplength=500, justify='left')
+            lbl.pack(side='left', fill='x', expand=True)
+
+        self.output_text.window_create(tk.END, window=outer)
+        self.output_text.insert(tk.END, '\n')
+
+    def _build_punishment_fields(self, data):
+        st = data.get('status', '').upper()
+        if st == 'BANNED':
+            return '#f07178', 'ЗАБАНЕН', '#f07178'
+        elif st == 'SUSPICIOUS':
+            return '#ffcb6b', 'ПОДОЗРИТЕЛЬНЫЙ', '#ffcb6b'
+        elif st == 'CLEAN':
+            return '#c3e88d', 'ЧИСТ', '#c3e88d'
+        return '#546e7a', st, '#546e7a'
+
+    def _render_player_summary(self, d):
+        st = d.get('status', '').upper()
+        if st == 'BANNED':
+            ac, st_txt, sc = '#f07178', 'ЗАБАНЕН', '#f07178'
+        elif st == 'SUSPICIOUS':
+            ac, st_txt, sc = '#ffcb6b', 'ПОДОЗРИТЕЛЬНЫЙ', '#ffcb6b'
+        elif st == 'CLEAN':
+            ac, st_txt, sc = '#c3e88d', 'ЧИСТ', '#c3e88d'
+        else:
+            ac, st_txt, sc = '#546e7a', st, '#546e7a'
+        copy = '\n'.join([
+            f"Игрок: {d.get('primary', '?')}",
+            f"Статус: {st}",
+            f"Наказаний: {d.get('ban_counts', 0)}",
+        ])
+        self._add_section_embed(
+            f"ИГРОК: {d.get('primary', '?')}", ac, [
+                ('Ник поиска', d.get('nickname', '?'), '#eeffff'),
+                ('Статус', st_txt, sc),
+                ('Наказаний', str(d.get('ban_counts', 0)), '#ffcb6b'),
+                ('HWID стёрт', 'Да' if d.get('hwid_erased') else 'Нет', '#969696'),
+            ], copy_text=copy
+        )
+
+    def _render_punishment(self, d):
+        ac, st_txt, sc = self._build_punishment_fields(d)
+        copy = '\n'.join([
+            f"Наказание #{d.get('index', '?')}",
+            f"Игрок: {d.get('player', '?')}",
+            f"Статус: {d.get('status', '?')}",
+            f"Причина: {d.get('reason', '?')}",
+            f"Выдал: {d.get('admin', '?')}",
+        ])
+        self._add_section_embed(
+            f"НАКАЗАНИЕ #{d.get('index', '?')}", ac, [
+                ('Игрок', d.get('player', '?'), '#eeffff'),
+                ('Статус', st_txt, sc),
+                ('Причина', d.get('reason', '?'), '#ffcb6b'),
+                ('Выдал', d.get('admin', '?'), '#82aaff'),
+            ], copy_text=copy
+        )
+
+    def _render_nicknames(self, d):
+        nicks = d.get('nicknames', [])
+        copy = '\n'.join(nicks)
+        max_show = 12
+        shown = nicks[:max_show]
+        rest = len(nicks) - max_show
+        lines = shown[:]
+        if rest > 0:
+            lines.append(f"... и ещё {rest}")
+        self._add_section_embed(
+            f"НИКНЕЙМЫ ({len(nicks)})", '#82aaff', [
+                ('Основной', d.get('primary', '?'), '#eeffff'),
+                ('Всего', str(len(nicks)), '#82aaff'),
+                ('Список', '\n'.join(lines), '#c792ea'),
+            ], copy_text=copy
+        )
+
+    def _render_complaint(self, d):
+        link = d.get('link', '?')
+        copy = '\n'.join([
+            f"Жалоба #{d.get('index', '?')}",
+            f"Канал: {d.get('channel', '?')}",
+            f"Автор: {d.get('author', '?')}",
+            f"Ссылка: {link}",
+        ])
+        self._add_section_embed(
+            f"ЖАЛОБА #{d.get('index', '?')}", '#f07178', [
+                ('Канал', d.get('channel', '?'), '#eeffff'),
+                ('Автор', d.get('author', '?'), '#82aaff'),
+                ('Ссылка', link, '#89ddff'),
+                ('Содержание', d.get('content', '')[:200], '#969696'),
+            ], copy_text=copy
+        )
+
+    def _render_ips(self, d):
+        items = d.get('items', [])
+        copy = '\n'.join(items)
+        max_show = 15
+        shown = items[:max_show]
+        rest = len(items) - max_show
+        lines = shown[:]
+        if rest > 0:
+            lines.append(f"... и ещё {rest}")
+        self._add_section_embed(
+            f"IP-АДРЕСА ({len(items)})", '#89ddff', [
+                ('Всего', str(len(items)), '#89ddff'),
+                ('Основной', d.get('primary', '?'), '#eeffff'),
+                ('Список', '\n'.join(lines), '#c792ea'),
+            ], copy_text=copy
+        )
+
+    def _render_hwids(self, d):
+        items = d.get('items', [])
+        copy = '\n'.join(items)
+        max_show = 15
+        shown = items[:max_show]
+        rest = len(items) - max_show
+        lines = shown[:]
+        if rest > 0:
+            lines.append(f"... и ещё {rest}")
+        self._add_section_embed(
+            f"HWID ({len(items)})", '#89ddff', [
+                ('Всего', str(len(items)), '#89ddff'),
+                ('Основной', d.get('primary', '?'), '#eeffff'),
+                ('Список', '\n'.join(lines), '#c792ea'),
+            ], copy_text=copy
+        )
+
+    def _render_denied_logins(self, d):
+        logins = d.get('logins', [])
+        max_show = 8
+        copy = '\n'.join([
+            f"{l.get('time', '?')} | {l.get('user_name', '?')} | {l.get('ip_address', '?')}"
+            for l in logins
+        ])
+        lines = []
+        for l in logins[:max_show]:
+            t = l.get('time', '?')[:19]
+            u = l.get('user_name', '?')
+            ip = l.get('ip_address', '?')
+            lines.append(f"{t} | {u} | {ip}")
+        if len(logins) > max_show:
+            lines.append(f"... и ещё {len(logins) - max_show}")
+        self._add_section_embed(
+            f"ОТКЛОНЁННЫЕ ВХОДЫ ({len(logins)})", '#f07178', [
+                ('Всего', str(len(logins)), '#f07178'),
+                ('Последние', '\n'.join(lines), '#eeffff'),
+            ], copy_text=copy
+        )
+
     def _poll_output(self):
         try:
-            while True:
-                line = self.output_queue.get_nowait()
-                if line == "__DONE__":
-                    self.running = False
-                    self.start_btn.config(state="normal")
-                    self.stop_btn.config(state="disabled")
-                else:
-                    self._log(ANSI_RE.sub("", line))
+            processed = 0
+            while processed < 200:
+                item = self.output_queue.get_nowait()
+                processed += 1
+
+                if isinstance(item, dict):
+                    msg_type = item.get("type", "")
+                    if msg_type == "progress":
+                        cur = item.get("current", 0)
+                        total = item.get("total", 1)
+                        pct = int(cur / max(total, 1) * 100)
+                        self.progress_var.set(pct)
+                        msg = item.get("msg", "")
+                        if msg:
+                            self.progress_label.config(text=msg)
+                    elif msg_type == "log":
+                        text = item.get("text", "")
+                        if not text:
+                            continue
+                        text_upper = text.upper()
+                        if "ERROR" in text_upper or "CRITICAL" in text_upper:
+                            self._insert_colored(text)
+                    elif msg_type == "punishment":
+                        self._render_punishment(item)
+                    elif msg_type == "player_summary":
+                        self._render_player_summary(item)
+                    elif msg_type == "punishments_done":
+                        self.output_text.see(tk.END)
+                    elif msg_type == "nicknames":
+                        self._render_nicknames(item)
+                    elif msg_type == "complaint":
+                        self._render_complaint(item)
+                    elif msg_type == "complaints_done":
+                        self.output_text.see(tk.END)
+                    elif msg_type == "ips":
+                        self._render_ips(item)
+                    elif msg_type == "hwids":
+                        self._render_hwids(item)
+                    elif msg_type == "denied_logins":
+                        self._render_denied_logins(item)
+                    elif msg_type == "scan_results_done":
+                        self.output_text.see(tk.END)
+                        self._insert_colored("\n")
+                elif isinstance(item, str):
+                    if item == "__DONE__":
+                        self.running = False
+                        self.start_btn.config(state="normal")
+                        self.stop_btn.config(state="disabled")
+                        self.progress_var.set(100)
+                        self.progress_label.config(text="Завершено")
+                        self._show_report_button()
+                        self.root.after(500, self._generate_html_report)
+                    elif re.match(r'^\d{4}-\d{2}-\d{2}', item) or 'API Calls=' in item or 'Depth Dist=' in item:
+                        continue
+                    else:
+                        self._insert_colored(item)
+
+            self.output_text.see(tk.END)
         except queue.Empty:
             pass
-        self.root.after(100, self._poll_output)
+        self.root.after(50, self._poll_output)
 
-    def _copy_selection(self, event=None):
-        try:
-            selected = self.output_text.selection_get()
-            self.root.clipboard_clear()
-            self.root.clipboard_append(selected)
-        except tk.TclError:
-            pass
-        return "break"
+    def _on_ctrl_key(self, event):
+        if event.keycode in (67, 99):
+            try:
+                selected = self.output_text.selection_get()
+                self.root.clipboard_clear()
+                self.root.clipboard_append(selected)
+            except tk.TclError:
+                pass
+            return "break"
+        return None
+
+    def _on_entry_ctrl_key(self, event):
+        if event.keycode in (67, 99):
+            try:
+                selected = event.widget.selection_get()
+                self.root.clipboard_clear()
+                self.root.clipboard_append(selected)
+            except tk.TclError:
+                pass
+            return "break"
+        elif event.keycode in (86, 118):
+            try:
+                text = self.root.clipboard_get()
+                event.widget.insert(tk.INSERT, text)
+            except tk.TclError:
+                pass
+            return "break"
+        return None
 
     def _log(self, text):
         self.output_text.insert(tk.END, text)
         self.output_text.see(tk.END)
 
     def _on_stop(self):
-        if self.bot and self.bot_loop and not self.bot_loop.is_closed():
-            async def stop():
-                await self.bot.close()
-            asyncio.run_coroutine_threadsafe(stop(), self.bot_loop)
-            self._log("\n⏹ Остановка...\n")
+        self.running = False
+        if self.bot:
+            try:
+                if self.bot_loop and not self.bot_loop.is_closed():
+                    async def stop():
+                        await self.bot.close()
+                    asyncio.run_coroutine_threadsafe(stop(), self.bot_loop)
+                    self._log("\n⏹ Остановка...\n")
+                else:
+                    self._log("\n⏹ Остановлено\n")
+            except Exception:
+                self._log("\n⏹ Остановлено\n")
         else:
             self._log("\n⏹ Остановлено\n")
-            self.running = False
-            self.start_btn.config(state="normal")
-            self.stop_btn.config(state="disabled")
+        self.start_btn.config(state="normal")
+        self.stop_btn.config(state="disabled")
+        self.progress_label.config(text="Остановлено")
+
+    def _show_report_button(self):
+        if hasattr(self, '_report_btn') and self._report_btn.winfo_exists():
+            return
+        btn_frame = tk.Frame(self.output_text, bg="#2d2d2d", highlightbackground="#4a4a4a", highlightthickness=1, padx=8, pady=6)
+        self._report_btn = tk.Button(
+            btn_frame, text="📄 СФОРМИРОВАТЬ ОТЧЁТ",
+            command=self._generate_html_report,
+            font=("Segoe UI", 11, "bold"),
+            bg="#82aaff", fg="#1a1a1a",
+            activebackground="#6e8cd9", activeforeground="#1a1a1a",
+            relief="raised", bd=2, padx=20, pady=6, cursor="hand2"
+        )
+        self._report_btn.pack()
+        self.output_text.window_create(tk.END, window=btn_frame)
+        self.output_text.insert(tk.END, '\n')
+        self.output_text.see(tk.END)
+
+    @staticmethod
+    def _html_escape(text):
+        if not text:
+            return ""
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    def _generate_html_report(self):
+        report_dir = os.path.join(ROOT_DIR, "reports")
+        json_path = os.path.join(report_dir, "scan_report.json")
+        if not os.path.exists(json_path):
+            self._insert_colored(f"\nФайл отчёта не найден: {json_path}\n")
+            return
+        try:
+            import json
+            with open(json_path, encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            self._insert_colored(f"\nОшибка чтения отчёта: {e}\n")
+            return
+
+        esc = self._html_escape
+
+        player = data[0] if data else {}
+        nick = player.get("nickname", "Неизвестно")
+        primary = player.get("primary_nickname", nick)
+        status = player.get("status", "unknown")
+        bans = player.get("ban_counts", 0)
+        reasons = player.get("ban_reasons", [])
+        hwid_erased = player.get("hwid_erased", False)
+
+        status_color = {"banned": "#f07178", "suspicious": "#ffcb6b", "clean": "#c3e88d"}.get(status.lower(), "#546e7a")
+        status_ru = {"banned": "ЗАБАНЕН", "suspicious": "ПОДОЗРИТЕЛЬНЫЙ", "clean": "ЧИСТ"}.get(status.lower(), status)
+
+        reasons_html = ""
+        for i, r in enumerate(reasons):
+            reason = r.get("reason", str(r)) if isinstance(r, dict) else str(r)
+            admin = r.get("username", "N/A") if isinstance(r, dict) else "N/A"
+            reason_short = (reason[:600] + "...") if len(reason) > 600 else reason
+            stripe = "#2a2a2a" if i % 2 == 0 else "#252526"
+            reasons_html += f"""
+            <div class="info-card" style="background:{stripe}">
+              <div class="badge bad-red">{i+1}</div>
+              <div class="card-fields">
+                <div class="field"><span class="key">Причина</span><span class="val yellow">{esc(reason_short)}</span></div>
+                <div class="field"><span class="key">Выдал</span><span class="val blue">{esc(admin)}</span></div>
+              </div>
+            </div>"""
+
+        html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="utf-8"><title>DeadSpace Check — {esc(primary)}</title>
+<style>
+  *{{margin:0;padding:0;box-sizing:border-box}}
+  body{{background:#1a1a1a;color:#d4d4d4;font-family:'Segoe UI',sans-serif;padding:24px;display:flex;justify-content:center}}
+  .report{{max-width:780px;width:100%}}
+  .header{{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}}
+  .header-left h1{{font-size:24px;margin-bottom:4px}}
+  .header-left .sub{{color:#888;font-size:13px}}
+  .status-badge{{display:inline-block;padding:4px 14px;border-radius:4px;font-weight:700;font-size:13px;color:#fff;background:{status_color}}}
+  .section-title{{font-size:16px;font-weight:700;margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid #333;color:#eeffff}}
+  .info-card{{border-radius:6px;padding:12px 16px;margin-bottom:6px;display:flex;gap:12px;align-items:start}}
+  .badge{{color:#fff;font-weight:700;font-size:13px;border-radius:50%;width:28px;height:28px;min-width:28px;display:flex;align-items:center;justify-content:center}}
+  .bad-red{{background:#f07178}}
+  .bad-green{{background:#c3e88d;color:#1a1a1a}}
+  .bad-blue{{background:#82aaff;color:#1a1a1a}}
+  .bad-purple{{background:#c792ea}}
+  .bad-orange{{background:#ffcb6b;color:#1a1a1a}}
+  .card-fields{{flex:1;min-width:0}}
+  .field{{display:flex;gap:8px;margin-bottom:3px;font-size:13px;align-items:baseline}}
+  .key{{color:#888;min-width:70px;flex-shrink:0;font-weight:600}}
+  .val{{word-break:break-word}}
+  .yellow{{color:#ffcb6b}}
+  .blue{{color:#82aaff}}
+  .green{{color:#c3e88d}}
+  .purple{{color:#c792ea}}
+  .gray{{color:#888}}
+  .orange{{color:#ffcb6b}}
+  .cyan{{color:#89ddff}}
+  .mono{{font-family:'Consolas','Courier New',monospace;font-size:12px;word-break:break-all}}
+  .link{{color:#82aaff;text-decoration:underline;word-break:break-all}}
+  .nick-list{{background:#252526;border-radius:6px;padding:12px 16px;font-size:13px;line-height:1.7;color:#c792ea}}
+  .content-box{{background:#1e1e1e;border-radius:4px;padding:8px 10px;margin-top:4px;font-size:12px;line-height:1.5;color:#d4d4d4;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;border:1px solid #333}}
+  .footer{{margin-top:32px;padding-top:12px;border-top:1px solid #333;font-size:11px;color:#555;text-align:center}}
+  .footer .brand{{color:#82aaff;font-weight:600}}
+  .tag{{display:inline-block;padding:1px 8px;border-radius:3px;font-size:11px;font-weight:600;margin-right:4px}}
+  .tag-red{{background:#f0717844;color:#f07178}}
+  .tag-green{{background:#c3e88d44;color:#c3e88d}}
+  .tag-orange{{background:#ffcb6b44;color:#ffcb6b}}
+  .tag-blue{{background:#82aaff44;color:#82aaff}}
+</style></head>
+<body><div class="report">
+  <div class="header">
+    <div class="header-left">
+      <h1>🔍 {esc(primary)}</h1>
+      <div class="sub">Ник поиска: {esc(nick)}</div>
+    </div>
+  </div>
+  <span class="status-badge">{status_ru}</span>
+
+  <div class="section-title">📜 Наказания</div>
+  {reasons_html if reasons_html else '<div class="gray" style="padding:8px 0;font-size:13px">Нет наказаний</div>'}
+"""
+        for item in data[1:]:
+            typ = item.get("type", "")
+            if typ == "associated_accounts":
+                nicks = item.get("nicknames", [])
+                html += f'<div class="section-title">👤 Связанные никнеймы ({len(nicks)})</div><div class="nick-list">{"<br>".join(esc(n) for n in nicks)}</div>\n'
+
+            elif typ == "complaints":
+                links = item.get("links", [])
+                html += f'<div class="section-title">📋 Наказания на других серверах ({len(links)})</div>'
+                for ci, c in enumerate(links[:30]):
+                    ch = c.get("channel", "?")
+                    auth = c.get("author", "?")
+                    content = c.get("content", "")
+                    link = c.get("link", "")
+                    stripe = "#2a2a2a" if ci % 2 == 0 else "#252526"
+                    content_short = (content[:800] + "...") if len(content) > 800 else content
+                    content_html = f'<div class="content-box">{esc(content_short)}</div>' if content else ""
+                    link_html = f'<div class="field"><span class="key">Ссылка</span><a class="val link" href="{esc(link)}">{esc(link[:90])}{"..." if len(link)>90 else ""}</a></div>' if link else ""
+                    html += f'''<div class="info-card" style="background:{stripe}">
+                <div class="badge bad-blue">{ci+1}</div>
+                <div class="card-fields">
+                  <div class="field"><span class="key">Канал</span><span class="val orange">#{esc(ch)}</span></div>
+                  <div class="field"><span class="key">Автор</span><span class="val blue">{esc(auth)}</span></div>
+                  {link_html}
+                  {content_html}
+                </div>
+              </div>'''
+                html += '\n'
+
+            elif typ == "associated_ips":
+                ips = item.get("ips", [])
+                html += f'<div class="section-title">🌐 Связанные IP-адреса ({len(ips)})</div>'
+                for idx, ip_entry in enumerate(ips[:20]):
+                    ip = ip_entry.get("direct_ip_connections", "?")
+                    owner = ip_entry.get("owner", "")
+                    shared = ip_entry.get("shared_with", [])
+                    owned_by_primary = ip_entry.get("owned_by_primary", False)
+                    owned_by_alt = ip_entry.get("owned_by_alt", False)
+                    stripe = "#252526"
+                    owner_tag = ""
+                    if owned_by_primary:
+                        owner_tag = '<span class="tag tag-green">Основной</span>'
+                    elif owned_by_alt:
+                        owner_tag = '<span class="tag tag-orange">Альт</span>'
+                    else:
+                        owner_tag = '<span class="tag tag-red">Чужой</span>'
+                    shared_html = ""
+                    if shared:
+                        shared_html = f'<div class="field"><span class="key">Общие с</span><span class="val purple">{esc(", ".join(shared[:8]))}</span></div>'
+                    html += f'''<div class="info-card" style="background:{stripe}">
+                <div class="badge bad-purple">{idx+1}</div>
+                <div class="card-fields">
+                  <div class="field"><span class="key">IP</span><span class="val mono cyan">{esc(ip)}</span> {owner_tag}</div>
+                  {shared_html}
+                </div>
+              </div>'''
+                html += '\n'
+
+            elif typ == "associated_hwids":
+                hwids = item.get("hwids", [])
+                html += f'<div class="section-title">🔑 Связанные HWID ({len(hwids)})</div>'
+                for idx, hw_entry in enumerate(hwids[:20]):
+                    hwid = hw_entry.get("hwid", "?")[:32]
+                    owner = hw_entry.get("owner", "")
+                    shared = hw_entry.get("shared_with", [])
+                    owned_by_primary = hw_entry.get("owned_by_primary", False)
+                    owned_by_alt = hw_entry.get("owned_by_alt", False)
+                    stripe = "#252526"
+                    owner_tag = ""
+                    if owned_by_primary:
+                        owner_tag = '<span class="tag tag-green">Основной</span>'
+                    elif owned_by_alt:
+                        owner_tag = '<span class="tag tag-orange">Альт</span>'
+                    else:
+                        owner_tag = '<span class="tag tag-red">Чужой</span>'
+                    shared_html = ""
+                    if shared:
+                        shared_html = f'<div class="field"><span class="key">Общие с</span><span class="val purple">{esc(", ".join(shared[:8]))}</span></div>'
+                    html += f'''<div class="info-card" style="background:{stripe}">
+                <div class="badge bad-orange">{idx+1}</div>
+                <div class="card-fields">
+                  <div class="field"><span class="key">HWID</span><span class="val mono">{esc(hwid)}</span> {owner_tag}</div>
+                  {shared_html}
+                </div>
+              </div>'''
+                html += '\n'
+
+            elif typ == "denied_login_attempts":
+                attempts = item.get("attempts", [])
+                if attempts:
+                    html += f'<div class="section-title">🚫 Отклонённые входы ({len(attempts)})</div>'
+                    for ai, a in enumerate(attempts[:12]):
+                        t = a.get("time", "?")[:19]
+                        u = a.get("user_name", "?")
+                        ip = a.get("ip_address", "?")
+                        server = a.get("server", "?")
+                        hwid = a.get("hwid", "")
+                        stripe = "#2a2a2a" if ai % 2 == 0 else "#252526"
+                        hwid_html = f'<div class="field"><span class="key">HWID</span><span class="val mono gray">{esc(hwid[:24])}</span></div>' if hwid else ""
+                        html += f'''<div class="info-card" style="background:{stripe}">
+                <div class="badge bad-red">{ai+1}</div>
+                <div class="card-fields">
+                  <div class="field"><span class="key">Время</span><span class="val">{esc(t)}</span></div>
+                  <div class="field"><span class="key">Ник</span><span class="val yellow">{esc(u)}</span></div>
+                  <div class="field"><span class="key">IP</span><span class="val mono cyan">{esc(ip)}</span></div>
+                  <div class="field"><span class="key">Сервер</span><span class="val">{esc(server)}</span></div>
+                  {hwid_html}
+                </div>
+              </div>'''
+                    html += '\n'
+
+        html += """<div class="footer"><span class="brand">Golub4ik (WikiHampter) DeadSpace Checker</span></div></div></body></html>"""
+
+        out_path = os.path.join(report_dir, "scan_report.html")
+        try:
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write(html)
+            import webbrowser
+            webbrowser.open(f'file://{os.path.abspath(out_path)}')
+            self._insert_colored(f"\n📄 Отчёт открыт в браузере: {out_path}\n")
+            save_to = filedialog.asksaveasfilename(
+                parent=self.root,
+                title="Сохранить отчёт как",
+                defaultextension=".html",
+                initialfile=f"{primary}.html",
+                filetypes=[("HTML files", "*.html"), ("All files", "*.*")]
+            )
+            if save_to:
+                try:
+                    with open(save_to, 'w', encoding='utf-8') as f:
+                        f.write(html)
+                    self._insert_colored(f"💾 Отчёт сохранён: {save_to}\n")
+                except Exception as e:
+                    self._insert_colored(f"Ошибка сохранения: {e}\n")
+        except Exception as e:
+            self._insert_colored(f"\nОшибка сохранения отчета: {e}\n")
 
     def _apply_config_overrides(self):
         overrides = self.settings.get("config", {})
@@ -580,10 +1194,14 @@ class BanCheckerGUI:
 
     def _on_close(self):
         self.running = False
-        if self.bot and self.bot_loop and not self.bot_loop.is_closed():
-            async def stop():
-                await self.bot.close()
-            asyncio.run_coroutine_threadsafe(stop(), self.bot_loop)
+        if self.bot:
+            try:
+                if self.bot_loop and not self.bot_loop.is_closed():
+                    async def stop():
+                        await self.bot.close()
+                    asyncio.run_coroutine_threadsafe(stop(), self.bot_loop)
+            except Exception:
+                pass
         self.root.destroy()
 
 

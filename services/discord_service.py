@@ -231,6 +231,7 @@ class DiscordService:
                     chunk_size = 1000
                     remaining = history_limit
                     before_id = None
+                    total_fetched = 0
                     while remaining > 0:
                         current_chunk = min(chunk_size, remaining)
                         history_kwargs = {
@@ -246,7 +247,10 @@ class DiscordService:
                         if not chunk_messages:
                             break
                         all_messages.extend(chunk_messages)
+                        total_fetched += len(chunk_messages)
                         remaining -= len(chunk_messages)
+                        if total_fetched % 5000 == 0:
+                            self.logger.info(f"  {discord_channel.name}: fetched {total_fetched}/{history_limit} messages...")
                         if len(chunk_messages) < current_chunk:
                             break
                         before_id = int(chunk_messages[-1].id)
@@ -365,6 +369,7 @@ class DiscordService:
             combined_pattern = re.compile("|".join(patterns), re.IGNORECASE)
         except Exception as e:
             self.logger.warning(f"Error creating combined regex: {e}")
+        admin_patterns = [re.compile(rf"администратор[^а-я]*{re.escape(nick)}\b", re.IGNORECASE) for nick in valid_nicknames]
         search_term_lower = search_term.lower() if search_term else None
         result = []
         concurrent_tasks = []
@@ -422,6 +427,9 @@ class DiscordService:
                                     found_nickname = True
                                     break
                         if found_nickname:
+                            searchable_full = (message.content or "") + (" " + self._get_embeds_text(message) if hasattr(message, 'embeds') and message.embeds else "")
+                            if any(p.search(searchable_full) for p in admin_patterns):
+                                continue
                             searchable_text = content_lower
                             if hasattr(message, 'embeds') and message.embeds:
                                 searchable_text += " " + self._get_embeds_text(message).lower()

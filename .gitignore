@@ -1,4 +1,5 @@
 scan_report.json
+scan_report.html
 scan_report_*.json
 config_*.py
 complaint_message_cache.json.bak

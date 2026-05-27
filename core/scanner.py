@@ -113,7 +113,8 @@ class ExponentialBackoff:
 class Scanner:
     def __init__(self, discord_service: DiscordService, admin_service: AdminService,
                  cache_service: CacheService, report_service: ReportService,
-                 player_analyzer: PlayerAnalyzer) -> None:
+                 player_analyzer: PlayerAnalyzer,
+                 progress_queue=None) -> None:
         self.discord = discord_service
         self.admin = admin_service
         self.admin_panel = admin_service.admin_panel
@@ -142,6 +143,7 @@ class Scanner:
         self._operation_timeout = self.cfg.api.operation_timeout
         self._term_timeout = self.cfg.api.term_timeout
         self._batch_timeout = self.cfg.api.batch_timeout
+        self._set_progress_queue(progress_queue)
 
         self.circuit_breaker = CircuitBreaker(
             failure_threshold=self.cfg.api.circuit_breaker.failure_threshold,
@@ -155,6 +157,16 @@ class Scanner:
             multiplier=self.cfg.api.backoff.multiplier,
             jitter=self.cfg.api.backoff.jitter
         )
+
+    def _set_progress_queue(self, q):
+        self.progress_queue = q
+
+    def _report_progress(self, current, total, msg=""):
+        if self.progress_queue is not None:
+            try:
+                self.progress_queue.put_nowait({"type": "progress", "current": current, "total": total, "msg": msg})
+            except Exception:
+                pass
 
         self._conservative_batch_size = self.cfg.scan.batch_processing.conservative_batch_size
         self._aggressive_batch_size = self.cfg.scan.batch_processing.aggressive_batch_size
@@ -376,6 +388,8 @@ class Scanner:
                     f"({progress_pct:.1f}%). Success rate: "
                     f"{successful_batches}/{successful_batches + failed_batches}"
                 )
+
+                self._report_progress(i, len(all_priority_terms), f"Batch {batch_number} ({progress_pct:.0f}%)")
 
                 if delay_task:
                     await delay_task
@@ -1202,15 +1216,18 @@ class Scanner:
     async def scan_nickname(self, nickname: str, complaint_search_term: Optional[str] = None) -> List[Dict[str, Any]]:
         start_time = datetime.now()
         self.logger.info(f"Starting nickname search for: {nickname}")
+        self._report_progress(0, 4, "Загрузка жалоб...")
         try:
             self.complaint_channels = await self.discord.update_complaint_cache(
                 self.complaint_channels,
                 history_limit=self.cfg.discord.message_history_limit
             )
+            self._report_progress(1, 4, "Поиск игрока...")
             player = await self.process_term(nickname)
             if not player:
                 self.logger.info(f"No player found for nickname: {nickname}")
                 return []
+            self._report_progress(2, 4, "Поиск жалоб...")
             complaint_links = await self.discord.find_nickname_mentions(
                 player.nicknames,
                 self.complaint_channels,
@@ -1219,7 +1236,73 @@ class Scanner:
             player.complaint_links = complaint_links
             if complaint_search_term:
                 self.logger.info(f"Found {len(complaint_links)} complaints with '{complaint_search_term}'")
-            report_data = self.report.generate_nickname_search_report(nickname, player)
+            self._report_progress(3, 4, "Формирование отчёта...")
+
+            if self.progress_queue is not None:
+                def _send(data):
+                    try:
+                        self.progress_queue.put_nowait(data)
+                    except Exception:
+                        pass
+
+                primary = getattr(player, 'primary_nickname', player.nicknames[0] if player.nicknames else nickname)
+                status = getattr(player, 'status', 'unknown')
+                hwid_erased = getattr(player, 'hwid_erased', False)
+
+                _send({"type": "player_summary", "nickname": nickname, "primary": primary,
+                       "status": status, "ban_counts": getattr(player, 'ban_counts', 0),
+                       "hwid_erased": hwid_erased})
+
+                if hasattr(player, 'ban_reasons') and player.ban_reasons:
+                    for i, ban in enumerate(player.ban_reasons):
+                        _send({
+                            "type": "punishment", "player": primary, "status": status,
+                            "reason": ban.get("reason", str(ban)) if isinstance(ban, dict) else str(ban),
+                            "admin": ban.get("username", "N/A") if isinstance(ban, dict) else "N/A",
+                            "index": i + 1,
+                        })
+                    _send({"type": "punishments_done"})
+
+                if hasattr(player, 'nicknames') and player.nicknames and len(player.nicknames) > 1:
+                    _send({"type": "nicknames", "nicknames": player.nicknames, "primary": primary})
+
+                if hasattr(player, 'complaint_links') and player.complaint_links:
+                    for i, c in enumerate(player.complaint_links):
+                        _send({
+                            "type": "complaint",
+                            "channel": c.get("channel", "?"),
+                            "author": c.get("author", "?"),
+                            "content": c.get("content", "")[:300],
+                            "link": c.get("link", "?"),
+                            "index": i + 1,
+                        })
+                    _send({"type": "complaints_done"})
+
+                if hasattr(player, 'associated_ips') and player.associated_ips:
+                    items = []
+                    for ip, users in player.associated_ips.items():
+                        if primary in users and len(users) == 1:
+                            items.append(ip)
+                        else:
+                            items.append(f"{ip}  ▶  {', '.join(users[:5])}")
+                    _send({"type": "ips", "items": items, "primary": primary})
+
+                if hasattr(player, 'associated_hwids') and player.associated_hwids:
+                    items = []
+                    for hwid, users in player.associated_hwids.items():
+                        if primary in users and len(users) == 1:
+                            items.append(hwid[:32])
+                        else:
+                            items.append(f"{hwid[:32]}  ▶  {', '.join(users[:5])}")
+                    _send({"type": "hwids", "items": items, "primary": primary})
+
+                if hasattr(player, 'denied_logins') and player.denied_logins:
+                    _send({"type": "denied_logins", "logins": list(player.denied_logins)})
+
+                _send({"type": "scan_results_done"})
+
+            report_data = self.report.generate_nickname_search_report(nickname, player, gui_mode=self.progress_queue is not None)
+            self._report_progress(4, 4, "Готово")
             duration = (datetime.now() - start_time).total_seconds()
             self.perf.logger.info(f"Nickname search for '{nickname}' completed in {duration:.2f}s")
             return report_data

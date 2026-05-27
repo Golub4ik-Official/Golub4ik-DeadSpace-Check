@@ -2,7 +2,7 @@
 # DISCORD CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-DISCORD_USER_TOKEN = "XXXXXXXXXXXX"  # Replace with actual token
+DISCORD_USER_TOKEN = ""  # Replace with actual token
 
 # Target channel ID for monitoring
 TARGET_CHANNEL_ID = 1487309345246150666
@@ -23,7 +23,6 @@ COMPLAINT_CHANNEL_IDS = [
     1291023511607054387,  # Adventure Time
     1241692667214168166,  # Space Stories - Marines
     1264636346610221068,  # FIRE STATION 2.0
-    1105247551881498764,  # SS220 (SS13?)
     1132930484847005726,  # Backman
     921498847862214666,  # SS14/Corvax (bans)
 ]
@@ -34,8 +33,8 @@ MESSAGE_HISTORY_LIMIT = 70000
 # AUTHENTICATION
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-ADMIN_USERNAME = "WikiHampter"  # Replace with actual username
-ADMIN_PASSWORD = "XXXXXXXX"  # Replace with actual password
+ADMIN_USERNAME = ""  # Replace with actual username
+ADMIN_PASSWORD = ""  # Replace with actual password
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # API CONFIGURATION

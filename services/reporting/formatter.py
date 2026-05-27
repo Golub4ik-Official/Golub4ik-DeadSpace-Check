@@ -77,7 +77,7 @@ class ReportFormatter:
         self._print_boxed(title, width, style=style)
 
         if self.config.show_timestamps:
-            timestamp_str = f"Report generated: {self.timestamp}"
+            timestamp_str = f"Отчёт создан: {self.timestamp}"
             print(f"{self._get_fmt('GRAY')}{timestamp_str:>{width}}{self.fmt['END']}")
 
 

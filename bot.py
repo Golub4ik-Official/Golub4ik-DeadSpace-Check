@@ -12,7 +12,7 @@ from services.reporting import ReportService
 
 
 class BanCheckerBot:
-    def __init__(self, token: str, admin_panel, config: Dict[str, Any]) -> None:
+    def __init__(self, token: str, admin_panel, config: Dict[str, Any], progress_queue=None) -> None:
         self.token = token
         self.config = config
         self.client = discord.Client()
@@ -26,7 +26,8 @@ class BanCheckerBot:
             self.admin_service,
             self.cache_service,
             self.report_service,
-            self.player_analyzer
+            self.player_analyzer,
+            progress_queue=progress_queue
         )
         self.client.event(self.on_ready)
 
