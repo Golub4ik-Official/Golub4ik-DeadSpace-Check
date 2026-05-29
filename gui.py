@@ -535,7 +535,12 @@ class BanCheckerGUI:
 
         tk.Frame(content, bg='#3a3a3a', height=1).pack(fill='x', pady=4)
 
-        for label, value, val_color in fields:
+        for field in fields:
+            suffix = None
+            if len(field) == 4:
+                label, value, val_color, suffix = field
+            else:
+                label, value, val_color = field
             row = tk.Frame(content, bg='#252526')
             row.pack(fill='x', pady=1)
             tk.Label(row, text=label + ':', font=('Consolas', 9, 'bold'),
@@ -543,6 +548,9 @@ class BanCheckerGUI:
             lbl = tk.Label(row, text=str(value), font=('Consolas', 9),
                            fg=val_color, bg='#252526', anchor='w', wraplength=500, justify='left')
             lbl.pack(side='left', fill='x', expand=True)
+            if suffix:
+                tk.Label(row, text=str(suffix), font=('Consolas', 9),
+                         fg='#969696', bg='#252526', anchor='w').pack(side='left')
 
         self.output_text.window_create(tk.END, window=outer)
         self.output_text.insert(tk.END, '\n')
@@ -583,20 +591,46 @@ class BanCheckerGUI:
 
     def _render_punishment(self, d):
         ac, st_txt, sc = self._build_punishment_fields(d)
+        player_nick = d.get('player', '?')
+        banned_nick = d.get('banned_nickname', player_nick)
+        is_alt = banned_nick != player_nick
+        nickname_display = banned_nick
+        nickname_suffix = ' (альт)' if is_alt else None
+        admin = d.get('admin', 'N/A')
+        ban_type = d.get('ban_type', '')
+        ban_date = d.get('ban_date', '')
+        ban_expires = d.get('ban_expires', '')
+        date_str = ''
+        if ban_date and ban_date != 'N/A':
+            date_str = ban_date
+            if ban_expires and ban_expires != 'N/A' and ban_expires.lower() not in ('никогда', 'never'):
+                date_str += f' → {ban_expires}'
         copy = '\n'.join([
             f"Наказание #{d.get('index', '?')}",
-            f"Игрок: {d.get('player', '?')}",
+            f"Игрок: {player_nick}",
             f"Статус: {d.get('status', '?')}",
             f"Причина: {d.get('reason', '?')}",
-            f"Выдал: {d.get('admin', '?')}",
+            f"Никнейм: {banned_nick}{' (альт)' if is_alt else ''}",
+            f"Выдал: {admin}",
+            f"Тип: {ban_type}" if ban_type and ban_type != 'N/A' else '',
+            f"Дата: {date_str}" if date_str else '',
         ])
+        fields = [
+            ('Игрок', player_nick, '#eeffff'),
+            ('Статус', st_txt, sc),
+            ('Причина', d.get('reason', '?'), '#ffcb6b'),
+        ]
+        if ban_type and ban_type != 'N/A':
+            fields.append(('Тип', ban_type, '#c792ea'))
+        if nickname_suffix:
+            fields.append(('Никнейм', nickname_display, '#82aaff', nickname_suffix))
+        else:
+            fields.append(('Никнейм', nickname_display, '#82aaff'))
+        fields.append(('Выдал', admin, '#82aaff'))
+        if date_str:
+            fields.append(('Дата', date_str, '#89ddff'))
         self._add_section_embed(
-            f"НАКАЗАНИЕ #{d.get('index', '?')}", ac, [
-                ('Игрок', d.get('player', '?'), '#eeffff'),
-                ('Статус', st_txt, sc),
-                ('Причина', d.get('reason', '?'), '#ffcb6b'),
-                ('Выдал', d.get('admin', '?'), '#82aaff'),
-            ], copy_text=copy
+            f"НАКАЗАНИЕ #{d.get('index', '?')}", ac, fields, copy_text=copy
         )
 
     def _render_nicknames(self, d):
@@ -858,15 +892,33 @@ class BanCheckerGUI:
         reasons_html = ""
         for i, r in enumerate(reasons):
             reason = r.get("reason", str(r)) if isinstance(r, dict) else str(r)
-            admin = r.get("username", "N/A") if isinstance(r, dict) else "N/A"
+            banned_nick = r.get("username", primary) if isinstance(r, dict) else primary
+            admin = r.get("admin", "N/A") if isinstance(r, dict) else "N/A"
+            ban_type = r.get("type", "") if isinstance(r, dict) else ""
+            ban_date = r.get("date", "") if isinstance(r, dict) else ""
+            ban_expires = r.get("expires", "") if isinstance(r, dict) else ""
+            is_alt = banned_nick != primary
             reason_short = (reason[:600] + "...") if len(reason) > 600 else reason
             stripe = "#2a2a2a" if i % 2 == 0 else "#252526"
+            nickname_html = f'<span class="val blue">{esc(banned_nick)}</span>'
+            if is_alt:
+                nickname_html += f' <span class="gray">(альт)</span>'
+            date_html = ""
+            if ban_date and ban_date != "N/A":
+                date_str = esc(ban_date)
+                if ban_expires and ban_expires != "N/A" and ban_expires.lower() not in ("никогда", "never"):
+                    date_str += f" → {esc(ban_expires)}"
+                date_html = f'\n                <div class="field"><span class="key">Дата</span><span class="val cyan">{date_str}</span></div>'
+            type_html = ""
+            if ban_type and ban_type != "N/A":
+                type_html = f'\n                <div class="field"><span class="key">Тип</span><span class="val purple">{esc(ban_type)}</span></div>'
             reasons_html += f"""
             <div class="info-card" style="background:{stripe}">
               <div class="badge bad-red">{i+1}</div>
               <div class="card-fields">
-                <div class="field"><span class="key">Причина</span><span class="val yellow">{esc(reason_short)}</span></div>
-                <div class="field"><span class="key">Выдал</span><span class="val blue">{esc(admin)}</span></div>
+                <div class="field"><span class="key">Причина</span><span class="val yellow">{esc(reason_short)}</span></div>{type_html}
+                <div class="field"><span class="key">Никнейм</span>{nickname_html}</div>
+                <div class="field"><span class="key">Выдал</span><span class="val blue">{esc(admin)}</span></div>{date_html}
               </div>
             </div>"""
 

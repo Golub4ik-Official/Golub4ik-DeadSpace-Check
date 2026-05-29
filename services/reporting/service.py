@@ -438,12 +438,25 @@ class ReportService:
 
         for i, ban_info in enumerate(player.ban_reasons[:limit]):
             reason_text = ""
+            banned_nick = primary_nick
             admin_name = "N/A"
+            ban_type = ban_info.get("type", "") if isinstance(ban_info, dict) else ""
+            ban_date = ban_info.get("date", "") if isinstance(ban_info, dict) else ""
+            ban_expires = ban_info.get("expires", "") if isinstance(ban_info, dict) else ""
             if isinstance(ban_info, dict) and "reason" in ban_info:
                 reason_text = ban_info["reason"]
-                admin_name = ban_info.get("username", "N/A")
+                banned_nick = ban_info.get("username", primary_nick)
+                admin_name = ban_info.get("admin", "N/A")
             else:
                 reason_text = str(ban_info)
+
+            is_alt = banned_nick != primary_nick
+            nickname_display = f"{banned_nick} (альт)" if is_alt else banned_nick
+            date_str = ""
+            if ban_date and ban_date != "N/A":
+                date_str = ban_date
+                if ban_expires and ban_expires != "N/A" and ban_expires.lower() not in ("никогда", "never"):
+                    date_str += f" -> {ban_expires}"
 
             block_title = f"НАКАЗАНИЕ #{i+1}"
             box_v, end_box = self._print_section_box_start(
@@ -467,11 +480,28 @@ class ReportService:
                 key_width=14, key_color_keys=('WHITE', 'BOLD'),
                 value_color_keys=('YELLOW',), line_padding=line_pad
             )
+            if ban_type and ban_type != "N/A":
+                self.formatter.print_key_value_in_box(
+                    "Тип", ban_type, box_v, base_indent_str,
+                    key_width=14, key_color_keys=('WHITE', 'BOLD'),
+                    value_color_keys=('BRIGHT_MAGENTA',), line_padding=line_pad
+                )
+            self.formatter.print_key_value_in_box(
+                "Никнейм", nickname_display, box_v, base_indent_str,
+                key_width=14, key_color_keys=('WHITE', 'BOLD'),
+                value_color_keys=('BRIGHT_BLUE',), line_padding=line_pad
+            )
             self.formatter.print_key_value_in_box(
                 "Выдал", admin_name, box_v, base_indent_str,
                 key_width=14, key_color_keys=('WHITE', 'BOLD'),
                 value_color_keys=('BRIGHT_BLUE',), line_padding=line_pad
             )
+            if date_str:
+                self.formatter.print_key_value_in_box(
+                    "Дата", date_str, box_v, base_indent_str,
+                    key_width=14, key_color_keys=('WHITE', 'BOLD'),
+                    value_color_keys=('BRIGHT_CYAN',), line_padding=line_pad
+                )
 
             end_box()
             print()

@@ -7,6 +7,7 @@ from typing import Dict, Union, List, Any, Optional, Tuple, OrderedDict
 from urllib.parse import urljoin, quote_plus
 
 import aiohttp
+import re
 
 try:
     from selectolax.parser import HTMLParser, Node
@@ -851,20 +852,98 @@ class AdminPanel:
                 if ban_body:
                     ban_info_list: List[Dict[str, str]] = []
                     rows = ban_body.css("tr")
+                    col_indices = {}
+                    header_row = ban_table_node.css_first("thead tr")
+                    if header_row:
+                        for idx, th in enumerate(header_row.css("th, td")):
+                            col_indices[th.text(strip=True).lower()] = idx
+
+                    def _cell(idx, fallback=None):
+                        nonlocal col_indices
+                        if idx is not None and len(cols) > idx:
+                            return cols[idx].text(separator=' ', strip=True)
+                        if fallback is not None:
+                            for fb in (fallback if isinstance(fallback, (list, tuple)) else [fallback]):
+                                if len(cols) > fb:
+                                    return cols[fb].text(separator=' ', strip=True)
+                        return "N/A"
+
+                    def _cell_raw(idx):
+                        if len(cols) > idx:
+                            return cols[idx].text(separator=' ', strip=True)
+                        return ""
+
+                    def _clean_date_cell(text):
+                        if not text:
+                            return text
+                        m = re.search(r'\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2})?', text)
+                        if m:
+                            return m.group(0)
+                        return text.strip()
+
                     for row_idx, row_node in enumerate(rows):
                         cols = row_node.css("td")
                         if cols and len(cols) >= 2:
-                            ban_reason = cols[1].text(strip=True)
+                            ban_reason = _cell_raw(1)
                             banned_username_for_entry = player_name
                             name_cell_content_strong = cols[0].css_first("strong")
                             if name_cell_content_strong:
-                                banned_username_for_entry = name_cell_content_strong.text(strip=True)
+                                banned_username_for_entry = name_cell_content_strong.text(separator=' ', strip=True)
                             else:
-                                potential_name_in_cell = cols[0].text(strip=True)
+                                potential_name_in_cell = _cell_raw(0)
                                 if potential_name_in_cell and potential_name_in_cell.lower() != player_name.lower():
                                     if not any(x in potential_name_in_cell for x in ["N/A", "User ID", "IP", "HWID"]):
                                         banned_username_for_entry = potential_name_in_cell
-                            ban_info_list.append({"reason": ban_reason, "username": banned_username_for_entry})
+
+                            admin_name = "N/A"
+                            for try_key in ["admin", "issued by", "выдал", "moderator", "staff", "administrator"]:
+                                if try_key in col_indices:
+                                    val = _cell(col_indices[try_key])
+                                    if val and val.lower() not in ("n/a", "server", "role ban", "", "unknown", "-"):
+                                        admin_name = val
+                                        break
+                            if admin_name == "N/A":
+                                for idx in [5, 4, 3, 6, 7]:
+                                    val = _cell_raw(idx)
+                                    if val and val.lower() not in ("n/a", "server", "role ban", "", "unknown", "-", "permanent", "temporary", "never", "local", "127.0.0.1", "none"):
+                                        admin_name = val
+                                        break
+
+                            ban_type = "N/A"
+                            for try_key in ["type", "ban type", "категория", "тип"]:
+                                if try_key in col_indices:
+                                    ban_type = _cell(col_indices[try_key])
+                                    break
+                            if ban_type == "N/A":
+                                val = _cell_raw(2)
+                                if val and val.lower() not in ("n/a", "", "unknown", "-", banned_username_for_entry.lower()):
+                                    ban_type = val
+
+                            ban_date = "N/A"
+                            for try_key in ["ban time", "time", "issued", "date", "timestamp", "дата", "когда"]:
+                                if try_key in col_indices:
+                                    ban_date = _clean_date_cell(_cell(col_indices[try_key]))
+                                    break
+                            if ban_date == "N/A":
+                                val = _cell_raw(3)
+                                if val and val.lower() not in ("n/a", "", "unknown", "-", "never", "permanent"):
+                                    ban_date = _clean_date_cell(val)
+
+                            ban_expires = "Никогда"
+                            for try_key in ["expires", "expiration", "expiry", "истекает", "срок"]:
+                                if try_key in col_indices:
+                                    ban_expires = _clean_date_cell(_cell(col_indices[try_key]))
+                                    break
+                            if ban_expires == "Никогда":
+                                val = _cell_raw(4)
+                                if val and val.lower() not in ("n/a", "", "unknown", "-"):
+                                    ban_expires = _clean_date_cell(val)
+
+                            ban_info_list.append({
+                                "reason": ban_reason, "username": banned_username_for_entry,
+                                "admin": admin_name, "type": ban_type,
+                                "date": ban_date, "expires": ban_expires
+                            })
                         elif self.logger.isEnabledFor(logging.WARNING):
                             self.logger.warning(
                                 f"Ban table row {row_idx} for {user_id} has < 2 columns: {row_node.html[:200]}")
@@ -973,7 +1052,11 @@ class AdminPanel:
                 result["ban_counts"] = max(result["ban_counts"], player_page_info.get("ban_counts", 0))
                 for ban_entry in player_page_info.get("ban_reasons", []):
                     if isinstance(ban_entry, dict) and "reason" in ban_entry and "username" in ban_entry:
-                        result["ban_reasons"].add((ban_entry["reason"], ban_entry["username"]))
+                        result["ban_reasons"].add((ban_entry["reason"], ban_entry["username"],
+                                                    ban_entry.get("admin", "N/A"),
+                                                    ban_entry.get("type", "N/A"),
+                                                    ban_entry.get("date", "N/A"),
+                                                    ban_entry.get("expires", "Никогда")))
                     elif self.logger.isEnabledFor(logging.WARNING):
                         self.logger.warning(f"Malformed ban entry from fetch_player_info: {ban_entry}")
             except asyncio.TimeoutError:
@@ -996,7 +1079,10 @@ class AdminPanel:
             result["status"] = "suspicious"
 
         result["nicknames"] = sorted(list(result["nicknames"]))
-        result["ban_reasons"] = [{"reason": r, "username": u} for r, u in sorted(list(result["ban_reasons"]))]
+        result["ban_reasons"] = [
+            {"reason": r, "username": u, "admin": a, "type": t, "date": d, "expires": e}
+            for r, u, a, t, d, e in sorted(list(result["ban_reasons"]))
+        ]
         result["shared_hwid_nicknames"] = sorted(list(result["shared_hwid_nicknames"]))
         result["raw_html_snippet"] = []
         for conn_prev in connections[:10]:

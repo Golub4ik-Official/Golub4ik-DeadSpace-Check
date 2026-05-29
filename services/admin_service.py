@@ -1084,7 +1084,13 @@ class AdminService:
         fmt_brs: List[Dict[str, str]] = []
         for r_entry in (raw_brs if isinstance((raw_brs := account_info_dict.get("ban_reasons", [])), list) else []):
             if isinstance(r_entry, dict) and "reason" in r_entry and "username" in r_entry:
-                fmt_brs.append({"reason": str(r_entry["reason"]), "username": str(r_entry["username"])})
+                fmt_brs.append({
+                    "reason": str(r_entry["reason"]), "username": str(r_entry["username"]),
+                    "admin": str(r_entry.get("admin", "N/A")),
+                    "type": str(r_entry.get("type", "N/A")),
+                    "date": str(r_entry.get("date", "N/A")),
+                    "expires": str(r_entry.get("expires", "Никогда")),
+                })
 
         p_conn_link = str(account_info_dict.get("connection_link", N_A))
         p_assoc_ips = ips if isinstance((ips := account_info_dict.get("associated_ips", {})), dict) else {}

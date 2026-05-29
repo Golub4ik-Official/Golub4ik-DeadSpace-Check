@@ -1216,18 +1216,18 @@ class Scanner:
     async def scan_nickname(self, nickname: str, complaint_search_term: Optional[str] = None) -> List[Dict[str, Any]]:
         start_time = datetime.now()
         self.logger.info(f"Starting nickname search for: {nickname}")
-        self._report_progress(0, 4, "Загрузка жалоб...")
+        self._report_progress(0, 5, "Загрузка жалоб...")
         try:
             self.complaint_channels = await self.discord.update_complaint_cache(
                 self.complaint_channels,
                 history_limit=self.cfg.discord.message_history_limit
             )
-            self._report_progress(1, 4, "Поиск игрока...")
+            self._report_progress(1, 5, "Поиск игрока по связям (IP/HWID)...")
             player = await self.process_term(nickname)
             if not player:
                 self.logger.info(f"No player found for nickname: {nickname}")
                 return []
-            self._report_progress(2, 4, "Поиск жалоб...")
+            self._report_progress(2, 5, "Поиск жалоб в Discord...")
             complaint_links = await self.discord.find_nickname_mentions(
                 player.nicknames,
                 self.complaint_channels,
@@ -1236,7 +1236,8 @@ class Scanner:
             player.complaint_links = complaint_links
             if complaint_search_term:
                 self.logger.info(f"Found {len(complaint_links)} complaints with '{complaint_search_term}'")
-            self._report_progress(3, 4, "Формирование отчёта...")
+            self._report_progress(3, 5, "Анализ и объединение данных...")
+            self._report_progress(4, 5, "Формирование отчета...")
 
             if self.progress_queue is not None:
                 def _send(data):
@@ -1258,7 +1259,12 @@ class Scanner:
                         _send({
                             "type": "punishment", "player": primary, "status": status,
                             "reason": ban.get("reason", str(ban)) if isinstance(ban, dict) else str(ban),
-                            "admin": ban.get("username", "N/A") if isinstance(ban, dict) else "N/A",
+                            "banned_nickname": ban.get("username", primary) if isinstance(ban, dict) else primary,
+                            "admin": ban.get("admin", "N/A") if isinstance(ban, dict) else "N/A",
+                            "ban_type": ban.get("type", "N/A") if isinstance(ban, dict) else "N/A",
+                            "ban_date": ban.get("date", "N/A") if isinstance(ban, dict) else "N/A",
+                            "ban_expires": ban.get("expires", "Никогда") if isinstance(ban, dict) else "Никогда",
+                            "search_nickname": nickname,
                             "index": i + 1,
                         })
                     _send({"type": "punishments_done"})
@@ -1302,7 +1308,7 @@ class Scanner:
                 _send({"type": "scan_results_done"})
 
             report_data = self.report.generate_nickname_search_report(nickname, player, gui_mode=self.progress_queue is not None)
-            self._report_progress(4, 4, "Готово")
+            self._report_progress(5, 5, "Готово")
             duration = (datetime.now() - start_time).total_seconds()
             self.perf.logger.info(f"Nickname search for '{nickname}' completed in {duration:.2f}s")
             return report_data
