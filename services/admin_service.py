@@ -3,7 +3,6 @@ import hashlib
 import json
 import logging
 import os
-import pickle
 import time
 from collections import deque, OrderedDict
 from datetime import datetime, timedelta
@@ -15,6 +14,7 @@ from aiolimiter import AsyncLimiter
 from admin_panel import N_A, AdminPanel
 from config_system import get_config
 from models.player import Player
+from services.database_service import DatabaseService
 from utils.async_utils import AsyncCache
 from utils.performance_monitor import monitor_performance, PerformanceTracker
 
@@ -67,67 +67,6 @@ class LRUCache:
             'misses': self.misses,
             'hit_rate': hit_rate
         }
-
-
-class PersistentCache:
-    def __init__(self, cache_file: str, max_size: int = 5000):
-        self.cache_file = cache_file
-        self.max_size = max_size
-        self.cache: Dict[str, Tuple[Any, float]] = {}
-        self.dirty = False
-        self.load_from_disk()
-
-    def load_from_disk(self) -> None:
-        if os.path.exists(self.cache_file):
-            try:
-                with open(self.cache_file, 'rb') as f:
-                    self.cache = pickle.load(f)
-                current_time = time.time()
-                expired_keys = [
-                    k for k, (_, timestamp) in self.cache.items()
-                    if current_time - timestamp > 86400
-                ]
-                for k in expired_keys:
-                    del self.cache[k]
-                if expired_keys:
-                    self.dirty = True
-            except Exception as e:
-                logging.warning(f"Failed to load cache from {self.cache_file}: {e}")
-                self.cache = {}
-
-    def save_to_disk(self) -> None:
-        if not self.dirty:
-            return
-
-        try:
-            if len(self.cache) > self.max_size:
-                sorted_items = sorted(
-                    self.cache.items(),
-                    key=lambda x: x[1][1],
-                    reverse=True
-                )
-                self.cache = dict(sorted_items[:self.max_size])
-
-            os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
-            with open(self.cache_file, 'wb') as f:
-                pickle.dump(self.cache, f)
-            self.dirty = False
-        except Exception as e:
-            logging.warning(f"Failed to save cache to {self.cache_file}: {e}")
-
-    def get(self, key: str, ttl: float = 86400) -> Optional[Any]:
-        if key in self.cache:
-            value, timestamp = self.cache[key]
-            if time.time() - timestamp < ttl:
-                return value
-            else:
-                del self.cache[key]
-                self.dirty = True
-        return None
-
-    def put(self, key: str, value: Any) -> None:
-        self.cache[key] = (value, time.time())
-        self.dirty = True
 
 
 class StabilizedLoadOptimizer:
@@ -322,9 +261,10 @@ class StabilizedLoadOptimizer:
 
 
 class AdminService:
-    def __init__(self, admin_panel: AdminPanel, max_concurrent_requests: int = 50) -> None:
+    def __init__(self, admin_panel: AdminPanel, db_service: DatabaseService, max_concurrent_requests: int = 50) -> None:
         cfg = get_config()
         self.admin_panel = admin_panel
+        self.db = db_service
 
         self.initial_concurrency = min(max_concurrent_requests, cfg.api.max_concurrent_requests)
         self.rate_limiter = AsyncLimiter(1.2, 1.0)
@@ -344,11 +284,6 @@ class AdminService:
         self.connections_cache = LRUCache(max_size=5000, ttl=1800)
         self.player_info_cache = LRUCache(max_size=2000, ttl=3600)
         self.search_results_cache = LRUCache(max_size=3000, ttl=1800)
-
-        cache_dir = getattr(cfg, 'cache_dir', './cache')
-        self.persistent_cache = PersistentCache(
-            os.path.join(cache_dir, 'admin_service_cache.pkl')
-        )
 
         self.expansion_terms_seen: Set[str] = set()
         self.expansion_terms_lock = asyncio.Lock()
@@ -406,7 +341,7 @@ class AdminService:
             self.logger.info(f"Player info cache stats: {self.player_info_cache.stats()}")
             self.logger.info(f"Search results cache stats: {self.search_results_cache.stats()}")
 
-            self.persistent_cache.save_to_disk()
+            self.db.admin_cache_cleanup()
 
             self._search_cache.clear()
             await self.cache.clear()
@@ -533,7 +468,7 @@ class AdminService:
         if cached_result is not None:
             return cached_result
 
-        persistent_result = self.persistent_cache.get(cache_key, ttl=3600)
+        persistent_result = self.db.admin_cache_get(cache_key, ttl=3600)
         if persistent_result is not None:
             self.connections_cache.put(cache_key, persistent_result)
             return persistent_result
@@ -542,7 +477,7 @@ class AdminService:
             result = await self.admin_panel.fetch_connections_for_user(identifier)
             if result:
                 self.connections_cache.put(cache_key, result)
-                self.persistent_cache.put(cache_key, result)
+                self.db.admin_cache_put(cache_key, result)
             return result
         except Exception as e:
             self.logger.error(f"Error fetching connections for {identifier}: {e}")
@@ -558,7 +493,7 @@ class AdminService:
         if cached_result is not None:
             return cached_result
 
-        persistent_result = self.persistent_cache.get(cache_key, ttl=7200)
+        persistent_result = self.db.admin_cache_get(cache_key, ttl=7200)
         if persistent_result is not None:
             self.player_info_cache.put(cache_key, persistent_result)
             return persistent_result
@@ -567,7 +502,7 @@ class AdminService:
             result = await self.admin_panel.fetch_player_info(user_id)
             if result:
                 self.player_info_cache.put(cache_key, result)
-                self.persistent_cache.put(cache_key, result)
+                self.db.admin_cache_put(cache_key, result)
             return result
         except Exception as e:
             self.logger.error(f"Error fetching player info for {user_id}: {e}")

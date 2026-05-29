@@ -4,6 +4,7 @@ import logging
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import json
@@ -15,11 +16,11 @@ import discord
 from admin_panel import AdminPanel
 from bot import BanCheckerBot
 from config_system import load_file, config as cfg
+from services.database_service import DatabaseService
 from utils.logging_utils import setup_logging
 from utils.path_utils import app_dir, bundle_dir
 
 ROOT_DIR = bundle_dir()
-SETTINGS_FILE = os.path.join(app_dir(), "gui_settings.json")
 CONFIG_FILE = os.path.join(bundle_dir(), "config.py")
 
 ANSI_RE = re.compile(r'\x1b\[[\d;]*[a-zA-Z]')
@@ -154,6 +155,7 @@ class BanCheckerGUI:
         self.root.geometry("820x720")
         self.root.minsize(650, 550)
 
+        self.db = DatabaseService()
         self.settings = self._load_settings()
         self.bot = None
         self.bot_loop = None
@@ -162,6 +164,7 @@ class BanCheckerGUI:
 
         self._setup_color_tags()
         self._build_ui()
+        self._fix_shortcuts()
         self._apply_settings()
         self._poll_output()
 
@@ -229,17 +232,16 @@ class BanCheckerGUI:
                     self.output_text.insert(tk.END, part)
 
     def _load_settings(self):
-        if os.path.exists(SETTINGS_FILE):
-            try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return {}
+        try:
+            return self.db.gui_get_all()
+        except Exception:
+            return {}
 
     def _save_settings(self):
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.settings, f, indent=2, ensure_ascii=False)
+        try:
+            self.db.gui_set_all(self.settings)
+        except Exception as e:
+            logging.warning(f"Failed to save GUI settings: {e}")
 
     def _apply_settings(self):
         self.username_var.set(self.settings.get("admin_username", ""))
@@ -353,10 +355,18 @@ class BanCheckerGUI:
             bg="#1e1e1e", fg="#d4d4d4", insertbackground="white",
         )
         self.output_text.grid(row=0, column=0, sticky="nsew")
-        self.output_text.bind("<Control-KeyPress>", self._on_ctrl_key)
-        self.root.bind_class("Entry", "<Control-KeyPress>", self._on_entry_ctrl_key)
 
         self._on_mode_change()
+
+    def _fix_shortcuts(self):
+        self.root.bind_all("<Control-KeyPress>", self._on_global_ctrl, add=True)
+        self.root.bind("<Control-KeyPress>", self._on_global_ctrl, add=True)
+        self.output_text.bind("<Control-KeyPress>", self._on_global_ctrl, add=True)
+        for w in (self.pw_entry, self.tk_entry, self.nickname_entry):
+            try:
+                w.bind("<Control-KeyPress>", self._on_global_ctrl, add=True)
+            except Exception:
+                pass
 
     def _toggle_secrets(self):
         show = "" if self.show_secrets.get() else "*"
@@ -397,6 +407,72 @@ class BanCheckerGUI:
         self._save_settings()
         messagebox.showinfo("", "Настройки сохранены")
 
+    def _show_first_run_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Первый запуск — предупреждение")
+        dialog.geometry("520x350")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding="20")
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(frame, text="⚠ ПЕРВЫЙ ЗАПУСК", font=("", 14, "bold"),
+                  foreground="#f57c00").pack(anchor="w")
+
+        ttk.Label(frame, text="Данные о наказаниях ещё не загружены.",
+                  wraplength=460).pack(anchor="w", pady=(10, 4))
+
+        ttk.Label(frame, text=(
+            "Скачиваются все сообщения из каналов жалоб Discord.\n"
+            "В среднем это занимает 10–15 минут."
+        ), wraplength=460).pack(anchor="w", pady=(0, 4))
+
+        ttk.Label(frame, text=(
+            "Это нормально. После завершения данные сохранятся локально, "
+            "и следующие запуски будут быстрыми."
+        ), wraplength=460).pack(anchor="w")
+
+        link_frame = ttk.Frame(frame)
+        link_frame.pack(fill="x", pady=(10, 4))
+        ttk.Label(link_frame, text="💡 Совет: ", font=("", 10, "bold")).pack(side="left")
+        ttk.Label(link_frame, text=(
+            "можно скачать уже готовую базу в разделе Releases — "
+            "положить deadspace_checker.db рядом с программой и запустить сразу"
+        ), wraplength=400).pack(side="left")
+
+        sep = ttk.Separator(frame, orient="horizontal")
+        sep.pack(fill="x", pady=(10, 10))
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x")
+
+        self._start_countdown = 10
+        start_btn = ttk.Button(btn_frame, text=f"Начать сканирование (через {self._start_countdown}с)",
+                               state="disabled", command=lambda: self._on_first_run_confirm(dialog))
+        start_btn.pack(side="right", padx=(6, 0))
+
+        def tick():
+            self._start_countdown -= 1
+            if self._start_countdown > 0:
+                start_btn.config(text=f"Начать сканирование (через {self._start_countdown}с)")
+                dialog.after(1000, tick)
+            else:
+                start_btn.config(text="Начать сканирование", state="normal")
+
+        dialog.after(1000, tick)
+
+        ttk.Button(btn_frame, text="Отмена",
+                   command=dialog.destroy).pack(side="right")
+
+        self.root.wait_window(dialog)
+        return getattr(self, "_first_run_confirmed", False)
+
+    def _on_first_run_confirm(self, dialog):
+        self._first_run_confirmed = True
+        dialog.destroy()
+
     def _on_start(self):
         if not self.username_var.get() or not self.password_var.get():
             messagebox.showerror("Ошибка", "Укажите ADMIN_USERNAME и ADMIN_PASSWORD")
@@ -406,31 +482,40 @@ class BanCheckerGUI:
             return
 
         mode = self.scan_mode.get()
-        if mode == "username" and not self.nickname_var.get():
+        nickname = self.nickname_var.get()
+        if mode == "username" and not nickname:
             messagebox.showerror("Ошибка", "Укажите имя игрока для пробива")
             return
 
-        cache_file = os.path.join(app_dir(), "complaint_message_cache.json")
-        if not os.path.exists(cache_file):
-            messagebox.showwarning(
-                "Первый запуск",
-                "Кэш жалоб ещё не создан.\n\n"
-                "Первый поиск будет ОЧЕНЬ ДОЛГИМ (скачиваются все сообщения из каналов жалоб Discord).\n"
-                "Это нормально. После завершения кэш сохранится, и следующие запуски будут быстрыми."
-            )
+        complaint_count = self.db.complaint_channel_count()
+        if complaint_count == 0:
+            if not self._show_first_run_dialog():
+                return
 
         self.output_text.delete("1.0", tk.END)
         self.progress_var.set(0)
         self.progress_label.config(text="")
+        self._scan_start = time.time()
+        self._last_progress_msg = ""
         self._log("▶ Запуск сканирования...\n")
 
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
         self.running = True
 
-        threading.Thread(target=self._run_bot, daemon=True).start()
+        thread_args = (
+            self.username_var.get(),
+            self.password_var.get(),
+            self.token_var.get(),
+            mode,
+            nickname,
+            int(self.msg_count_var.get()),
+            int(self.bypass_pages_var.get()),
+        )
+        threading.Thread(target=self._run_bot, args=thread_args, daemon=True).start()
 
-    def _run_bot(self):
+    def _run_bot(self, admin_username, admin_password, discord_token,
+                 scan_mode, scan_nickname, msg_limit, bypass_pages):
         original_stdout = sys.stdout
 
         try:
@@ -455,15 +540,14 @@ class BanCheckerGUI:
             load_file(CONFIG_FILE, cfg)
             self._apply_config_overrides()
 
-            cfg.auth.admin_username = self.username_var.get()
-            cfg.auth.admin_password = self.password_var.get()
-            cfg.discord.discord_user_token = self.token_var.get()
+            cfg.auth.admin_username = admin_username
+            cfg.auth.admin_password = admin_password
+            cfg.discord.discord_user_token = discord_token
 
-            mode = self.scan_mode.get()
-            cfg.scan.username = self.nickname_var.get() if mode == "username" else None
-            cfg.scan.check_ban_bypass = mode == "banbypass"
-            cfg.scan.message_limit = int(self.msg_count_var.get())
-            cfg.scan.ban_bypass_pages = int(self.bypass_pages_var.get())
+            cfg.scan.username = scan_nickname if scan_mode == "username" else None
+            cfg.scan.check_ban_bypass = scan_mode == "banbypass"
+            cfg.scan.message_limit = msg_limit
+            cfg.scan.ban_bypass_pages = bypass_pages
             cfg.logging.log_level = "INFO"
 
             logging.info("Starting Ban Checker Bot")
@@ -489,16 +573,16 @@ class BanCheckerGUI:
                 "message_interval_end": None,
             }
 
-            bot = BanCheckerBot(cfg.discord.discord_user_token, admin_panel, bot_config,
+            logging.info(f"Discord token length: {len(discord_token)}, starts with: {discord_token[:10]}...")
+
+            bot = BanCheckerBot(discord_token, admin_panel, bot_config,
                                progress_queue=self.output_queue)
             self.bot = bot
-            try:
-                self.bot_loop = bot.client.loop
-            except AttributeError:
-                self.bot_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(self.bot_loop)
 
-            bot.run()
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.bot_loop = loop
+            loop.run_until_complete(bot.client.start(discord_token))
 
         except Exception as e:
             self.output_queue.put(f"\nОшибка: {e}\n")
@@ -575,18 +659,22 @@ class BanCheckerGUI:
             ac, st_txt, sc = '#c3e88d', 'ЧИСТ', '#c3e88d'
         else:
             ac, st_txt, sc = '#546e7a', st, '#546e7a'
+        search_nick = d.get('nickname', '?')
+        primary_nick = d.get('primary', search_nick)
+        fields = [
+            ('Статус', st_txt, sc),
+            ('Наказаний', str(d.get('ban_counts', 0)), '#ffcb6b'),
+            ('HWID стёрт', 'Да' if d.get('hwid_erased') else 'Нет', '#969696'),
+        ]
+        if primary_nick != search_nick:
+            fields.insert(0, ('Основной ник', primary_nick, '#ffcb6b'))
         copy = '\n'.join([
-            f"Игрок: {d.get('primary', '?')}",
+            f"Игрок: {search_nick}",
             f"Статус: {st}",
             f"Наказаний: {d.get('ban_counts', 0)}",
         ])
         self._add_section_embed(
-            f"ИГРОК: {d.get('primary', '?')}", ac, [
-                ('Ник поиска', d.get('nickname', '?'), '#eeffff'),
-                ('Статус', st_txt, sc),
-                ('Наказаний', str(d.get('ban_counts', 0)), '#ffcb6b'),
-                ('HWID стёрт', 'Да' if d.get('hwid_erased') else 'Нет', '#969696'),
-            ], copy_text=copy
+            f"ИГРОК: {search_nick}", ac, fields, copy_text=copy
         )
 
     def _render_punishment(self, d):
@@ -739,7 +827,10 @@ class BanCheckerGUI:
                         self.progress_var.set(pct)
                         msg = item.get("msg", "")
                         if msg:
-                            self.progress_label.config(text=msg)
+                            self._last_progress_msg = msg
+                    elif msg_type == "progress_done":
+                        self.progress_var.set(100)
+                        self.progress_label.config(text="Завершено")
                     elif msg_type == "log":
                         text = item.get("text", "")
                         if not text:
@@ -775,6 +866,8 @@ class BanCheckerGUI:
                         self.stop_btn.config(state="disabled")
                         self.progress_var.set(100)
                         self.progress_label.config(text="Завершено")
+                        self._scan_start = None
+                        self._last_progress_msg = ""
                         self._show_report_button()
                         self.root.after(500, self._generate_html_report)
                     elif re.match(r'^\d{4}-\d{2}-\d{2}', item) or 'API Calls=' in item or 'Depth Dist=' in item:
@@ -785,34 +878,33 @@ class BanCheckerGUI:
             self.output_text.see(tk.END)
         except queue.Empty:
             pass
+
+        if getattr(self, '_scan_start', None) and getattr(self, '_last_progress_msg', None):
+            dt = time.time() - self._scan_start
+            if dt >= 3600:
+                elapsed = f"{int(dt//3600)}ч {int((dt%3600)//60)}м {int(dt%60)}с"
+            elif dt >= 60:
+                elapsed = f"{int(dt//60)}м {int(dt%60)}с"
+            else:
+                elapsed = f"{int(dt)}с"
+            self.progress_label.config(text=f"{self._last_progress_msg}  ⏱ {elapsed}")
+
         self.root.after(50, self._poll_output)
 
-    def _on_ctrl_key(self, event):
-        if event.keycode in (67, 99):
-            try:
-                selected = self.output_text.selection_get()
-                self.root.clipboard_clear()
-                self.root.clipboard_append(selected)
-            except tk.TclError:
-                pass
+    def _on_global_ctrl(self, event):
+        kc = event.keycode
+        w = event.widget
+        if kc == 67:
+            w.event_generate('<<Copy>>')
             return "break"
-        return None
-
-    def _on_entry_ctrl_key(self, event):
-        if event.keycode in (67, 99):
-            try:
-                selected = event.widget.selection_get()
-                self.root.clipboard_clear()
-                self.root.clipboard_append(selected)
-            except tk.TclError:
-                pass
+        elif kc == 86:
+            w.event_generate('<<Paste>>')
             return "break"
-        elif event.keycode in (86, 118):
-            try:
-                text = self.root.clipboard_get()
-                event.widget.insert(tk.INSERT, text)
-            except tk.TclError:
-                pass
+        elif kc == 88:
+            w.event_generate('<<Cut>>')
+            return "break"
+        elif kc == 65:
+            w.event_generate('<<SelectAll>>')
             return "break"
         return None
 
@@ -838,6 +930,8 @@ class BanCheckerGUI:
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
         self.progress_label.config(text="Остановлено")
+        self._scan_start = None
+        self._last_progress_msg = ""
 
     def _show_report_button(self):
         if hasattr(self, '_report_btn') and self._report_btn.winfo_exists():

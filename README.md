@@ -15,7 +15,7 @@
 
 ### Вариант 1 — Готовый EXE (Python не нужен)
 
-Скачай последнюю версию в разделе **Releases** этого репозитория — там лежит собранный `DeadSpaceChecker.exe`. Просто запусти, при первом старте он сам создаст `gui_settings.json` и папку `reports/`.
+Скачай последнюю версию в разделе **Releases** этого репозитория — там лежит собранный `DeadSpaceChecker.exe`. Просто запусти — база данных создаётся автоматически. Папка `reports/` появится после первого сканирования.
 
 ### Вариант 2 — Из исходников (с Python)
 
@@ -27,6 +27,26 @@ python -m venv .venv
 pip install -r requirements.txt
 python gui.py
 ```
+
+### Вариант 3 — С готовой базой (первый запуск мгновенно)
+
+Первый сбор кэша жалоб занимает 10–15 минут (скачиваются все сообщения из каналов Discord).
+Чтобы не ждать, можно скачать готовый `deadspace_checker.db` из раздела **Releases**.
+
+**Куда положить файл:**
+- Если пользуетесь EXE — положите `deadspace_checker.db` рядом с `DeadSpaceChecker.exe`
+- Если запускаете из исходников — положите в корень репозитория (туда же, где лежит `gui.py`)
+
+Программа сама найдёт файл при запуске, ничего настраивать не нужно. Дальнейшие запуски будут докачивать только новые сообщения — это занимает секунды.
+
+**Если готовой базы в релизе нет** — создайте её самостоятельно (потребуется Python и Discord токен):
+
+```bash
+pip install -r requirements.txt
+python build_cache.py --token ВАШ_DISCORD_ТОКЕН
+```
+
+После завершения появится `deadspace_checker.db`. Его можно использовать самому или загрузить в релиз для других пользователей.
 
 ## Интерфейс
 
@@ -74,10 +94,12 @@ python main.py --username <ник>                   # Исследование 
 gui.py                      Графический интерфейс (tkinter)
 admin_panel.py              Скрапинг панели администратора (async, aiohttp, selectolax)
 bot.py                      Координационный слой Discord (discord.py-self)
+build_cache.py              CLI-скрипт для предварительного создания БД кэша
 core/scanner.py             Загрузка сообщений, очередь задач, circuit breaker
 core/analyzer.py            Корреляция и слияние игроков по никнеймам
-services/admin_service.py   Клиент API администратора, кэширование
-services/cache_service.py   Персистентное кэширование жалоб (JSON)
+services/database_service.py   SQLite-бэкенд (кэш жалоб + админ-кэш + настройки)
+services/cache_service.py   Обёртка вокруг database_service для ComplaintChannel
+services/admin_service.py   Клиент API администратора, кэширование через SQLite
 services/discord_service.py Работа с Discord, поиск по каналам
 services/reporting/         Генерация отчётов (HTML + JSON)
 models/                     Типизированные модели (Player, DiscordMessage, ScanResult, Verdict, Complaint)

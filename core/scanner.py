@@ -168,6 +168,13 @@ class Scanner:
             except Exception:
                 pass
 
+    def _report_log(self, text):
+        if self.progress_queue is not None:
+            try:
+                self.progress_queue.put_nowait({"type": "log", "text": text})
+            except Exception:
+                pass
+
         self._conservative_batch_size = self.cfg.scan.batch_processing.conservative_batch_size
         self._aggressive_batch_size = self.cfg.scan.batch_processing.aggressive_batch_size
         self._batch_delay_base = self.cfg.scan.batch_processing.batch_delay_base
@@ -250,11 +257,19 @@ class Scanner:
         try:
             self.error_stats = {k: 0 for k in self.error_stats}
 
+            self._report_log("Начинаю загрузку данных о наказаниях... (10–15 минут)\n")
+
+            def _cache_progress(ch_idx, total_ch, fetched, total_to_fetch, msg):
+                self._report_log(f"  {msg}\n")
+                self._report_progress(fetched, total_to_fetch, msg)
+
             self.complaint_channels = await self.discord.update_complaint_cache(
                 self.complaint_channels,
-                history_limit=self.cfg.discord.message_history_limit
+                history_limit=self.cfg.discord.message_history_limit,
+                progress_callback=_cache_progress
             )
 
+            self._report_log("Загрузка данных о наказаниях завершена.\n")
             messages = await self.discord.scan_target_channel(
                 message_limit,
                 lambda m: any(embed.title == 'Arrived new player' for embed in m.embeds)
@@ -308,7 +323,9 @@ class Scanner:
             self.logger.error(f"Error during message scan: {str(e)}", exc_info=True)
             return []
         finally:
+            self._report_log("Сохраняю данные в базу данных...\n")
             self.cache.save_complaint_cache(self.complaint_channels)
+            self._report_log("Сохранение завершено.\n")
 
     async def _process_all_terms_enhanced(self, all_terms, term_is_login_event, user_id_terms,
                                           processed_terms, message_data):
@@ -553,11 +570,19 @@ class Scanner:
         try:
             self.error_stats = {k: 0 for k in self.error_stats}
 
+            self._report_log("Начинаю загрузку данных о наказаниях... (10–15 минут)\n")
+
+            def _cache_progress(ch_idx, total_ch, fetched, total_to_fetch, msg):
+                self._report_log(f"  {msg}\n")
+                self._report_progress(fetched, total_to_fetch, msg)
+
             self.complaint_channels = await self.discord.update_complaint_cache(
                 self.complaint_channels,
-                history_limit=self.cfg.discord.message_history_limit
+                history_limit=self.cfg.discord.message_history_limit,
+                progress_callback=_cache_progress
             )
 
+            self._report_log("Загрузка данных о наказаниях завершена.\n")
             messages = await self.discord.scan_target_channel_interval(
                 start_id,
                 end_id,
@@ -612,7 +637,9 @@ class Scanner:
             self.logger.error(f"Error during interval scan: {str(e)}", exc_info=True)
             return []
         finally:
+            self._report_log("Сохраняю данные в базу данных...\n")
             self.cache.save_complaint_cache(self.complaint_channels)
+            self._report_log("Сохранение завершено.\n")
 
     def _consolidate_results(self, scan_results):
         if not scan_results:
@@ -1216,7 +1243,7 @@ class Scanner:
     async def scan_nickname(self, nickname: str, complaint_search_term: Optional[str] = None) -> List[Dict[str, Any]]:
         start_time = datetime.now()
         self.logger.info(f"Starting nickname search for: {nickname}")
-        self._report_progress(0, 5, "Загрузка жалоб...")
+        self._report_progress(0, 5, "Загрузка данных о наказаниях...")
         try:
             self.complaint_channels = await self.discord.update_complaint_cache(
                 self.complaint_channels,
@@ -1227,7 +1254,7 @@ class Scanner:
             if not player:
                 self.logger.info(f"No player found for nickname: {nickname}")
                 return []
-            self._report_progress(2, 5, "Поиск жалоб в Discord...")
+            self._report_progress(2, 5, "Поиск наказаний в Discord...")
             complaint_links = await self.discord.find_nickname_mentions(
                 player.nicknames,
                 self.complaint_channels,

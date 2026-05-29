@@ -92,8 +92,6 @@ class DiscordService:
                 except Exception as e:
                     self.logger.error(f"Error processing message {msg.id}: {e}", exc_info=True)
                     continue
-                if scanned_count % 100 == 0:
-                    await asyncio.sleep(0.1)
         except discord.Forbidden:
             self.logger.error(f"Insufficient permissions to read channel {channel.name} ({channel.id})")
         except discord.HTTPException as e:
@@ -178,7 +176,6 @@ class DiscordService:
                     continue
 
                 if scanned_count % 100 == 0:
-                    await asyncio.sleep(0.1)
                     self.logger.info(f"Processed {scanned_count} messages, found {len(messages)} matches")
 
         except discord.Forbidden:
@@ -196,10 +193,12 @@ class DiscordService:
         return messages
 
     async def update_complaint_cache(self, complaint_channels: Dict[int, ComplaintChannel],
-                                     history_limit: int) -> Dict[int, ComplaintChannel]:
+                                     history_limit: int,
+                                     progress_callback=None) -> Dict[int, ComplaintChannel]:
         self.logger.info("Updating complaint message cache for all complaint channels...")
         updated_channels = complaint_channels.copy()
-        for ch_id, discord_channel in self.complaint_channels.items():
+        channel_items = list(self.complaint_channels.items())
+        for ch_idx, (ch_id, discord_channel) in enumerate(channel_items):
             self.logger.info(f"Processing channel: {discord_channel.name} ({ch_id})")
             channel_cache = updated_channels.get(ch_id, ComplaintChannel(
                 id=str(ch_id),
@@ -249,12 +248,14 @@ class DiscordService:
                         all_messages.extend(chunk_messages)
                         total_fetched += len(chunk_messages)
                         remaining -= len(chunk_messages)
-                        if total_fetched % 5000 == 0:
-                            self.logger.info(f"  {discord_channel.name}: fetched {total_fetched}/{history_limit} messages...")
+                        self.logger.info(f"  {discord_channel.name}: fetched {total_fetched}/{history_limit} ({total_fetched / history_limit * 100:.0f}%)...")
+                        if progress_callback:
+                            progress_callback(ch_idx, len(channel_items),
+                                              total_fetched, history_limit,
+                                              f"Загрузка {discord_channel.name}: {total_fetched}/{history_limit}")
                         if len(chunk_messages) < current_chunk:
                             break
                         before_id = int(chunk_messages[-1].id)
-                        await asyncio.sleep(0.5)
                     for msg in all_messages:
                         if str(msg.id) not in cached_message_ids:
                             complaint_msg = self._create_complaint_message(msg, discord_channel)
@@ -287,8 +288,6 @@ class DiscordService:
                 temp_messages = []
                 async for msg in channel.history(**kwargs):
                     temp_messages.append(msg)
-                    if len(temp_messages) % 100 == 0:
-                        await asyncio.sleep(0.1)
                 messages = temp_messages
                 break
             except discord.HTTPException as e:
@@ -477,7 +476,6 @@ class DiscordService:
                     except Exception as e:
                         self.logger.warning(f"Error processing message {message.id}: {e}")
                         continue
-                await asyncio.sleep(0.01)
             return channel_results
 
         max_concurrent = min(10, len(complaint_channels))
