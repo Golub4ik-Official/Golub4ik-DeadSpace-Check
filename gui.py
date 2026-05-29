@@ -20,6 +20,8 @@ from config_system import load_file, config as cfg
 from services.database_service import DatabaseService
 from utils.logging_utils import setup_logging
 from utils.path_utils import app_dir, bundle_dir
+from services.graph_service import generate_vis_graph_from_report_data
+from services.vpn_detector import enrich_report_data, get_vpn_detector
 
 ROOT_DIR = bundle_dir()
 CONFIG_FILE = os.path.join(bundle_dir(), "config.py")
@@ -90,6 +92,27 @@ CFG_CLOSE_TIME_THRESHOLD_MINUTES = _parse_config_value(_RAW_CFG, "CLOSE_TIME_THR
 CFG_TIME_THRESHOLD_MINUTES = _parse_config_value(_RAW_CFG, "TIME_THRESHOLD_MINUTES", 30)
 CFG_SUSPICIOUS_TIME_THRESHOLD_MINUTES = _parse_config_value(_RAW_CFG, "SUSPICIOUS_TIME_THRESHOLD_MINUTES", 60)
 CFG_IP_MATCH_TIMEDELTA_MINUTES = _parse_config_value(_RAW_CFG, "IP_MATCH_TIMEDELTA_MINUTES", 30)
+
+def _force_close_loop(loop):
+    if loop.is_closed():
+        return
+    try:
+        pending = asyncio.all_tasks(loop)
+        for t in pending:
+            t.cancel()
+    except Exception:
+        pass
+    try:
+        if not loop.is_closed():
+            loop.run_until_complete(loop.shutdown_asyncgens())
+    except Exception:
+        pass
+    try:
+        if not loop.is_closed():
+            loop.close()
+    except Exception:
+        pass
+
 
 CONFIG_OVERRIDE_MAP = {
     "TARGET_CHANNEL_ID": ("discord", "target_channel_id"),
@@ -529,6 +552,8 @@ class BanCheckerGUI:
                  scan_mode, scan_nickname, msg_limit, bypass_pages):
         original_stdout = sys.stdout
 
+        self._cleanup_previous_bot()
+
         try:
             log_format = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s")
 
@@ -580,6 +605,8 @@ class BanCheckerGUI:
                 "check_ban_bypass": cfg.scan.check_ban_bypass,
                 "ban_bypass_pages": cfg.scan.ban_bypass_pages,
                 "html_report_filename": cfg.report.html_report_filename,
+                "graph_format": cfg.report.graph_format,
+                "graph_output": cfg.report.graph_output,
                 "message_interval_start": None,
                 "message_interval_end": None,
             }
@@ -600,11 +627,61 @@ class BanCheckerGUI:
             import traceback
             self.output_queue.put(traceback.format_exc() + "\n")
         finally:
+            self._cleanup_loop()
             sys.stdout = original_stdout
             self.bot = None
             self.bot_loop = None
             self.output_queue.put(f"\n{'─'*50}\nПроцесс завершён\n")
             self.output_queue.put("__DONE__")
+
+    def _cleanup_previous_bot(self):
+        loop = getattr(self, 'bot_loop', None)
+        if loop and not loop.is_closed():
+            try:
+                if loop.is_running():
+                    async def _do_close():
+                        if self.bot:
+                            try:
+                                await self.bot.close()
+                            except Exception:
+                                pass
+                        _force_close_loop(loop)
+                    future = asyncio.run_coroutine_threadsafe(_do_close(), loop)
+                    future.result(timeout=10)
+                else:
+                    try:
+                        if self.bot:
+                            loop.run_until_complete(self.bot.close())
+                    except Exception:
+                        pass
+                    _force_close_loop(loop)
+            except Exception:
+                pass
+        self.bot_loop = None
+        self.bot = None
+
+    def _cleanup_loop(self):
+        loop = getattr(self, 'bot_loop', None)
+        if loop and not loop.is_closed():
+            try:
+                if loop.is_running():
+                    async def _full_cleanup():
+                        try:
+                            if self.bot:
+                                await self.bot.close()
+                        except Exception:
+                            pass
+                        _force_close_loop(loop)
+                    asyncio.run_coroutine_threadsafe(_full_cleanup(), loop).result(timeout=10)
+                else:
+                    try:
+                        if self.bot:
+                            loop.run_until_complete(self.bot.close())
+                    except Exception:
+                        pass
+                    _force_close_loop(loop)
+            except Exception:
+                pass
 
     def _copy_to_clipboard(self, text):
         self.root.clipboard_clear()
@@ -925,19 +1002,8 @@ class BanCheckerGUI:
 
     def _on_stop(self):
         self.running = False
-        if self.bot:
-            try:
-                if self.bot_loop and not self.bot_loop.is_closed():
-                    async def stop():
-                        await self.bot.close()
-                    asyncio.run_coroutine_threadsafe(stop(), self.bot_loop)
-                    self._log("\n⏹ Остановка...\n")
-                else:
-                    self._log("\n⏹ Остановлено\n")
-            except Exception:
-                self._log("\n⏹ Остановлено\n")
-        else:
-            self._log("\n⏹ Остановлено\n")
+        self._cleanup_previous_bot()
+        self._log("\n⏹ Остановлено\n")
         self.start_btn.config(state="normal")
         self.stop_btn.config(state="disabled")
         self.progress_label.config(text="Остановлено")
@@ -980,6 +1046,12 @@ class BanCheckerGUI:
         except Exception as e:
             self._insert_colored(f"\nОшибка чтения отчёта: {e}\n")
             return
+
+        self._insert_colored("\n🔍 Проверка IP на VPN...\n")
+        try:
+            enrich_report_data(data)
+        except Exception:
+            pass
 
         esc = self._html_escape
 
@@ -1075,7 +1147,11 @@ class BanCheckerGUI:
   .tag-green{{background:#c3e88d44;color:#c3e88d}}
   .tag-orange{{background:#ffcb6b44;color:#ffcb6b}}
   .tag-blue{{background:#82aaff44;color:#82aaff}}
-</style></head>
+  #graph-container{{border:1px solid #333}}
+</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
+</head>
 <body><div class="report">
   <div class="header">
     <div class="header-left">
@@ -1089,11 +1165,15 @@ class BanCheckerGUI:
   <div class="section-title">📜 Наказания</div>
   {reasons_html if reasons_html else '<div class="gray" style="padding:8px 0;font-size:13px">Нет наказаний</div>'}
 """
+        graph_injected = False
         for item in data[1:]:
             typ = item.get("type", "")
             if typ == "associated_accounts":
                 nicks = item.get("nicknames", [])
                 html += f'<div class="section-title">👤 Связанные никнеймы ({len(nicks)})</div><div class="nick-list">{"<br>".join(esc(n) for n in nicks)}</div>\n'
+                if not graph_injected:
+                    html += generate_vis_graph_from_report_data(data)
+                    graph_injected = True
 
             elif typ == "complaints":
                 links = item.get("links", [])
@@ -1128,6 +1208,12 @@ class BanCheckerGUI:
                     owned_by_primary = ip_entry.get("owned_by_primary", False)
                     owned_by_alt = ip_entry.get("owned_by_alt", False)
                     stripe = "#252526"
+                    vpn_info = ip_entry.get("vpn_info", {})
+                    vpn_badges = ""
+                    if vpn_info.get("proxy"):
+                        vpn_badges += '<span class="tag tag-red">VPN</span> '
+                    if vpn_info.get("hosting"):
+                        vpn_badges += '<span class="tag tag-orange">Хостинг</span> '
                     owner_tag = ""
                     if owned_by_primary:
                         owner_tag = '<span class="tag tag-green">Основной</span>'
@@ -1141,7 +1227,7 @@ class BanCheckerGUI:
                     html += f'''<div class="info-card" style="background:{stripe}">
                 <div class="badge bad-purple">{idx+1}</div>
                 <div class="card-fields">
-                  <div class="field"><span class="key">IP</span><span class="val mono cyan">{esc(ip)}</span> {owner_tag}</div>
+                  <div class="field"><span class="key">IP</span><span class="val mono cyan">{esc(ip)}</span> {owner_tag} {vpn_badges}</div>
                   {shared_html}
                 </div>
               </div>'''
@@ -1151,7 +1237,7 @@ class BanCheckerGUI:
                 hwids = item.get("hwids", [])
                 html += f'<div class="section-title">🔑 Связанные HWID ({len(hwids)})</div>'
                 for idx, hw_entry in enumerate(hwids[:20]):
-                    hwid = hw_entry.get("hwid", "?")[:32]
+                    hwid = hw_entry.get("hwid", "?")
                     owner = hw_entry.get("owner", "")
                     shared = hw_entry.get("shared_with", [])
                     owned_by_primary = hw_entry.get("owned_by_primary", False)
@@ -1187,13 +1273,19 @@ class BanCheckerGUI:
                         server = a.get("server", "?")
                         hwid = a.get("hwid", "")
                         stripe = "#2a2a2a" if ai % 2 == 0 else "#252526"
-                        hwid_html = f'<div class="field"><span class="key">HWID</span><span class="val mono gray">{esc(hwid[:24])}</span></div>' if hwid else ""
+                        vpn_info = a.get("vpn_info", {})
+                        vpn_badge = ""
+                        if vpn_info.get("proxy"):
+                            vpn_badge = '<span class="tag tag-red">VPN</span>'
+                        elif vpn_info.get("hosting"):
+                            vpn_badge = '<span class="tag tag-orange">Хостинг</span>'
+                        hwid_html = f'<div class="field"><span class="key">HWID</span><span class="val mono gray">{esc(hwid)}</span></div>' if hwid else ""
                         html += f'''<div class="info-card" style="background:{stripe}">
                 <div class="badge bad-red">{ai+1}</div>
                 <div class="card-fields">
                   <div class="field"><span class="key">Время</span><span class="val">{esc(t)}</span></div>
                   <div class="field"><span class="key">Ник</span><span class="val yellow">{esc(u)}</span></div>
-                  <div class="field"><span class="key">IP</span><span class="val mono cyan">{esc(ip)}</span></div>
+                  <div class="field"><span class="key">IP</span><span class="val mono cyan">{esc(ip)}</span> {vpn_badge}</div>
                   <div class="field"><span class="key">Сервер</span><span class="val">{esc(server)}</span></div>
                   {hwid_html}
                 </div>
@@ -1369,14 +1461,7 @@ class BanCheckerGUI:
 
     def _on_close(self):
         self.running = False
-        if self.bot:
-            try:
-                if self.bot_loop and not self.bot_loop.is_closed():
-                    async def stop():
-                        await self.bot.close()
-                    asyncio.run_coroutine_threadsafe(stop(), self.bot_loop)
-            except Exception:
-                pass
+        self._cleanup_previous_bot()
         self.root.destroy()
 
 

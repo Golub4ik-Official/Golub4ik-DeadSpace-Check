@@ -18,6 +18,9 @@ scan_report_*.json
 # Config overrides
 config_*.py
 
+# VPN cache
+vpn_cache.json
+
 # IDE
 .idea/*
 

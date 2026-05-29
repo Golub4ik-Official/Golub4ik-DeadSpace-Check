@@ -21,6 +21,11 @@ parser.add_argument("--log-level", type=str, default=None,
                     help="Logging level (DEBUG, INFO, WARNING, ERROR)")
 parser.add_argument("--config", type=str, default="config.py",
                     help="Path to config file")
+parser.add_argument("--graph", type=str, nargs="?", const="html", default=None,
+                    choices=["html", "png"],
+                    help="Render connection graph (html or png)")
+parser.add_argument("--graph-output", type=str, default=None,
+                    help="Output path for graph file")
 args = parser.parse_args()
 
 MESSAGE_LIMIT = args.messages if args.messages is not None else 700
@@ -40,6 +45,8 @@ SEARCH_LIMIT_LEVEL1 = None
 SEARCH_LIMIT_LEVEL2 = None
 SEARCH_LIMIT_DEFAULT = None
 
+GRAPH_FORMAT = args.graph
+GRAPH_OUTPUT = args.graph_output
 LOG_LEVEL = args.log_level
 CONFIG_FILE = args.config
 # ────────────────────────────────────────────────────────────────────────────────
@@ -72,6 +79,11 @@ def main():
         cfg.scan.search_limit_level2 = SEARCH_LIMIT_LEVEL2
     if SEARCH_LIMIT_DEFAULT is not None:
         cfg.scan.search_limit_default = SEARCH_LIMIT_DEFAULT
+
+    if GRAPH_FORMAT is not None:
+        cfg.report.graph_format = GRAPH_FORMAT
+    if GRAPH_OUTPUT is not None:
+        cfg.report.graph_output = GRAPH_OUTPUT
 
     if LOG_LEVEL is not None:
         cfg.logging.log_level = LOG_LEVEL
@@ -109,6 +121,8 @@ def main():
         "check_ban_bypass": cfg.scan.check_ban_bypass,
         "ban_bypass_pages": cfg.scan.ban_bypass_pages,
         "html_report_filename": cfg.report.html_report_filename,
+        "graph_format": cfg.report.graph_format,
+        "graph_output": cfg.report.graph_output,
         "message_interval_start": MESSAGE_INTERVAL_START,
         "message_interval_end": MESSAGE_INTERVAL_END
     }
