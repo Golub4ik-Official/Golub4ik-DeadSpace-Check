@@ -1,5 +1,9 @@
 # Golub4ik (WikiHampter) DeadSpace Checker
 
+<p align="center">
+  <img src="DeadSpaceLogo.png" alt="Logo" width="200"/>
+</p>
+
 Инструмент для администраторов SS14, который связывает телеметрию Discord с данными панели администратора DeadSpace14 для выявления обходов бана.
 
 ## Возможности

@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import base64
 import logging
 import queue
 import sys
@@ -22,6 +23,7 @@ from utils.path_utils import app_dir, bundle_dir
 
 ROOT_DIR = bundle_dir()
 CONFIG_FILE = os.path.join(bundle_dir(), "config.py")
+LOGO_PATH = os.path.join(bundle_dir(), "DeadSpaceLogo.png")
 
 ANSI_RE = re.compile(r'\x1b\[[\d;]*[a-zA-Z]')
 
@@ -156,6 +158,7 @@ class BanCheckerGUI:
         self.root.minsize(650, 550)
 
         self.db = DatabaseService()
+        self._set_icon()
         self.settings = self._load_settings()
         self.bot = None
         self.bot_loop = None
@@ -230,6 +233,14 @@ class BanCheckerGUI:
                     self.output_text.insert(tk.END, part, tuple(active_tags))
                 else:
                     self.output_text.insert(tk.END, part)
+
+    def _set_icon(self):
+        try:
+            logo = tk.PhotoImage(file=LOGO_PATH)
+            self.root.iconphoto(True, logo)
+            self._logo_img = logo
+        except Exception:
+            pass
 
     def _load_settings(self):
         try:
@@ -972,6 +983,13 @@ class BanCheckerGUI:
 
         esc = self._html_escape
 
+        logo_b64 = ""
+        try:
+            with open(LOGO_PATH, "rb") as f:
+                logo_b64 = base64.b64encode(f.read()).decode()
+        except Exception:
+            pass
+
         player = data[0] if data else {}
         nick = player.get("nickname", "Неизвестно")
         primary = player.get("primary_nickname", nick)
@@ -1064,6 +1082,7 @@ class BanCheckerGUI:
       <h1>🔍 {esc(primary)}</h1>
       <div class="sub">Ник поиска: {esc(nick)}</div>
     </div>
+    {f'<img src="data:image/png;base64,{logo_b64}" width="64" height="64" alt="Logo" style="border-radius:8px">' if logo_b64 else ''}
   </div>
   <span class="status-badge">{status_ru}</span>
 
