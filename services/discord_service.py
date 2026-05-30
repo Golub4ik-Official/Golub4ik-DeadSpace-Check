@@ -26,8 +26,7 @@ class DiscordService:
             self.target_channel_id = target_channel_id
             self.target_channel = self.client.get_channel(target_channel_id)
             if not self.target_channel:
-                self.logger.error(f"Target channel not found: {target_channel_id}")
-                success = False
+                self.logger.warning(f"Target channel not found: {target_channel_id} (optional for username/banbypass modes)")
             else:
                 self.logger.info(f"Found target channel: '{self.target_channel.name}' ({target_channel_id})")
                 permissions = self.target_channel.permissions_for(self.target_channel.guild.me)
