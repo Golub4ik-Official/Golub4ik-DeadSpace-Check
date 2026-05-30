@@ -1263,12 +1263,12 @@ class BanCheckerGUI:
   .tag-green{{background:#c3e88d44;color:#c3e88d}}
   .tag-orange{{background:#ffcb6b44;color:#ffcb6b}}
   .tag-blue{{background:#82aaff44;color:#82aaff}}
-  .copy-btn{background:#3a3a3a;color:#c3e88d;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:13px;padding:2px 8px;transition:.15s;white-space:nowrap}
-  .copy-btn:hover{background:#4a4a4a;border-color:#82aaff}
-  .copy-btn::after{content:attr(data-tip);display:none;position:absolute;bottom:130%;left:50%;transform:translateX(-50%);background:#333;color:#d4d4d4;padding:4px 10px;border-radius:4px;font-size:11px;white-space:nowrap;pointer-events:none;z-index:10}
-  .copy-btn:hover::after{display:block}
-  .copy-btn-wrap{position:relative;display:inline-flex;align-items:center}
-  .nick-item{display:inline-flex;align-items:center;gap:4px;margin:2px 0}
+  .copy-btn{{background:#3a3a3a;color:#c3e88d;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:13px;padding:2px 8px;transition:.15s;white-space:nowrap}}
+  .copy-btn:hover{{background:#4a4a4a;border-color:#82aaff}}
+  .copy-btn::after{{content:attr(data-tip);display:none;position:absolute;bottom:130%;left:50%;transform:translateX(-50%);background:#333;color:#d4d4d4;padding:4px 10px;border-radius:4px;font-size:11px;white-space:nowrap;pointer-events:none;z-index:10}}
+  .copy-btn:hover::after{{display:block}}
+  .copy-btn-wrap{{position:relative;display:inline-flex;align-items:center}}
+  .nick-item{{display:inline-flex;align-items:center;gap:4px;margin:2px 0}}
   #graph-container{{border:1px solid #333}}
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css">
