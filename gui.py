@@ -1263,6 +1263,12 @@ class BanCheckerGUI:
   .tag-green{{background:#c3e88d44;color:#c3e88d}}
   .tag-orange{{background:#ffcb6b44;color:#ffcb6b}}
   .tag-blue{{background:#82aaff44;color:#82aaff}}
+  .copy-btn{background:#3a3a3a;color:#c3e88d;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:13px;padding:2px 8px;transition:.15s;white-space:nowrap}
+  .copy-btn:hover{background:#4a4a4a;border-color:#82aaff}
+  .copy-btn::after{content:attr(data-tip);display:none;position:absolute;bottom:130%;left:50%;transform:translateX(-50%);background:#333;color:#d4d4d4;padding:4px 10px;border-radius:4px;font-size:11px;white-space:nowrap;pointer-events:none;z-index:10}
+  .copy-btn:hover::after{display:block}
+  .copy-btn-wrap{position:relative;display:inline-flex;align-items:center}
+  .nick-item{display:inline-flex;align-items:center;gap:4px;margin:2px 0}
   #graph-container{{border:1px solid #333}}
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css">
@@ -1281,12 +1287,64 @@ class BanCheckerGUI:
   <div class="section-title">📜 Наказания</div>
   {reasons_html if reasons_html else '<div class="gray" style="padding:8px 0;font-size:13px">Нет наказаний</div>'}
 """
+        nickname_data = {}
+        for item in data[1:]:
+            typ = item.get("type", "")
+            if typ == "associated_accounts":
+                for nick in item.get("nicknames", []):
+                    nickname_data.setdefault(nick, {"ips": [], "hwids": []})
+            elif typ == "associated_ips":
+                for ip_entry in item.get("ips", []):
+                    ip = ip_entry.get("direct_ip_connections", "")
+                    for user in ip_entry.get("raw_users", []):
+                        entry = nickname_data.setdefault(user, {"ips": [], "hwids": []})
+                        if ip and ip not in entry["ips"]:
+                            entry["ips"].append(ip)
+            elif typ == "associated_hwids":
+                for hw_entry in item.get("hwids", []):
+                    hwid = hw_entry.get("hwid", "")
+                    for user in hw_entry.get("raw_users", []):
+                        entry = nickname_data.setdefault(user, {"ips": [], "hwids": []})
+                        if hwid and hwid not in entry["hwids"]:
+                            entry["hwids"].append(hwid)
+
+        import json as _json
+        nickname_data_json = _json.dumps(nickname_data, ensure_ascii=False)
+        html += f"""<script>
+function copyText(text) {{
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+        navigator.clipboard.writeText(text).catch(function() {{ fallbackCopy(text); }});
+    }} else {{ fallbackCopy(text); }}
+}}
+function fallbackCopy(text) {{
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px';
+    document.body.appendChild(ta); ta.select();
+    try {{ document.execCommand('copy'); }} catch(e) {{}}
+    document.body.removeChild(ta);
+}}
+function copyNicknameData(nick) {{
+    var data = nicknameData[nick]; if (!data) return;
+    var lines = [];
+    for (var i = 0; i < data.ips.length; i++) lines.push(data.ips[i]);
+    for (var i = 0; i < data.hwids.length; i++) lines.push(data.hwids[i]);
+    copyText(lines.join('\\n'));
+}}
+var nicknameData = {nickname_data_json};
+</script>"""
+
         graph_injected = False
         for item in data[1:]:
             typ = item.get("type", "")
             if typ == "associated_accounts":
                 nicks = item.get("nicknames", [])
-                html += f'<div class="section-title">👤 Связанные никнеймы ({len(nicks)})</div><div class="nick-list">{"<br>".join(esc(n) for n in nicks)}</div>\n'
+                all_nicks_text = "\\n".join(esc(n) for n in nicks)
+                html += f'<div class="section-title" style="display:flex;align-items:center;gap:10px"><span>👤 Связанные никнеймы ({len(nicks)})</span><div class="copy-btn-wrap"><button class="copy-btn" onclick=\'copyText("{all_nicks_text}")\' data-tip="Скопировать все никнеймы">📋</button></div></div>'
+                nick_items = []
+                for n in nicks:
+                    safe_n = esc(n)
+                    nick_items.append(f'<span class="nick-item"><span class="copy-btn-wrap"><button class="copy-btn" onclick=\'copyNicknameData("{safe_n}")\' data-tip="Скопировать IP и HWID для {esc(n)}">📋</button></span>{esc(n)}</span>')
+                html += f'<div class="nick-list">{"<br>".join(nick_items)}</div>\n'
                 if not graph_injected:
                     html += generate_vis_graph_from_report_data(data)
                     graph_injected = True
@@ -1316,7 +1374,8 @@ class BanCheckerGUI:
 
             elif typ == "associated_ips":
                 ips = item.get("ips", [])
-                html += f'<div class="section-title">🌐 Связанные IP-адреса ({len(ips)})</div>'
+                all_ips_text = "\\n".join(esc(ip_entry.get("direct_ip_connections", "?")) for ip_entry in ips)
+                html += f'<div class="section-title" style="display:flex;align-items:center;gap:10px"><span>🌐 Связанные IP-адреса ({len(ips)})</span><div class="copy-btn-wrap"><button class="copy-btn" onclick=\'copyText("{all_ips_text}")\' data-tip="Скопировать все IP-адреса">📋</button></div></div>'
                 for idx, ip_entry in enumerate(ips[:20]):
                     ip = ip_entry.get("direct_ip_connections", "?")
                     owner = ip_entry.get("owner", "")
@@ -1351,7 +1410,8 @@ class BanCheckerGUI:
 
             elif typ == "associated_hwids":
                 hwids = item.get("hwids", [])
-                html += f'<div class="section-title">🔑 Связанные HWID ({len(hwids)})</div>'
+                all_hwids_text = "\\n".join(esc(hw_entry.get("hwid", "?")) for hw_entry in hwids)
+                html += f'<div class="section-title" style="display:flex;align-items:center;gap:10px"><span>🔑 Связанные HWID ({len(hwids)})</span><div class="copy-btn-wrap"><button class="copy-btn" onclick=\'copyText("{all_hwids_text}")\' data-tip="Скопировать все HWID">📋</button></div></div>'
                 for idx, hw_entry in enumerate(hwids[:20]):
                     hwid = hw_entry.get("hwid", "?")
                     owner = hw_entry.get("owner", "")
