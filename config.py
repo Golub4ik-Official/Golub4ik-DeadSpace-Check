@@ -5,7 +5,7 @@
 DISCORD_USER_TOKEN = ""  # Replace with actual token
 
 # Target channel ID for monitoring
-TARGET_CHANNEL_ID = 1487309345246150666
+TARGET_CHANNEL_ID = 1072622227276701776
 
 # Complaint/violation channel IDs for nickname cross-checking
 COMPLAINT_CHANNEL_IDS = [
@@ -103,6 +103,11 @@ CHECK_BAN_BYPASS = False
 BAN_BYPASS_PAGES = 3
 
 MAX_TERMS_PER_SCAN = 5000
+
+AUTO_BAN_ENABLED = False
+AUTO_BAN_REASON = "Ban bypass detected ({user}, confidence: {confidence}, bypassers: {bypassers})"
+AUTO_BAN_MINUTES = 0
+AUTO_BAN_MIN_CONFIDENCE = "HWID_MATCH"
 
 BYPASS_SEARCH_MAX_DEPTH = 2
 SEARCH_MAX_DEPTH = 3

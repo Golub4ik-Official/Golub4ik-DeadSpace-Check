@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import types
+from datetime import datetime
 from typing import List, Dict, Any
 
 import discord
@@ -210,7 +211,10 @@ class BanCheckerBot:
                 self.report_service.write_json_report(report_data)
                 logging.info(f"Report with {len(report_data)} items written to file")
 
-            self._generate_graphs(report_data)
+            if self.config.get("check_ban_bypass"):
+                self._generate_ban_bypass_html_report(report_data if report_data else [])
+            else:
+                self._generate_graphs(report_data)
         except Exception as e:
             logging.error(f"Error during scan: {e}", exc_info=True)
 
@@ -425,6 +429,134 @@ body{background:#1a1a1a;color:#d4d4d4;font-family:'Segoe UI',sans-serif;padding:
             webbrowser.open(f'file://{os.path.abspath(out_path)}')
         except Exception as e:
             logging.error(f"Failed to write HTML report: {e}")
+
+    async def run_offline(self):
+        try:
+            auth_cookie = self.config.get("auth_cookie", "")
+            if auth_cookie:
+                cookie_ok = await self.admin_service.admin_panel.try_auth_with_cookie(auth_cookie)
+                if cookie_ok:
+                    logging.info("Authenticated via auth cookie, skipping OIDC login")
+                    self.admin_service.admin_panel._is_authenticated = True
+                else:
+                    logging.warning("Auth cookie invalid, falling back to OIDC login")
+            if not await self.admin_service.login():
+                msg = "❌ Не удалось войти в админ-панель. Сервер авторизации account.spacestation14.com недоступен.\nПроверьте VPN/прокси или сетевое подключение.\n"
+                logging.error(msg.strip())
+                if self.scanner.progress_queue is not None:
+                    self.scanner.progress_queue.put_nowait(msg)
+                return
+            self.scanner.complaint_channels = self.scanner.cache.load_complaint_cache()
+            if self.config.get("check_ban_bypass"):
+                logging.info("Starting ban bypass check (offline mode)")
+                report_data = await self.scanner.scan_ban_bypasses(
+                    max_pages=self.config.get("ban_bypass_pages", 5)
+                )
+            elif self.config.get("username"):
+                logging.info(f"Starting nickname scan for: {self.config.get('username')}")
+                report_data = await self.scanner.scan_nickname(self.config.get("username"))
+            else:
+                report_data = []
+            self.report_service.write_json_report(report_data if report_data else [])
+            if self.config.get("check_ban_bypass"):
+                self._generate_ban_bypass_html_report(report_data if report_data else [])
+            elif report_data:
+                self._generate_html_report_with_graph(
+                    os.path.join(app_dir(), "reports", "scan_report.json"),
+                    os.path.join(app_dir(), "reports")
+                )
+        except Exception as e:
+            logging.error(f"Error during offline scan: {e}", exc_info=True)
+        finally:
+            await self.close()
+
+    def _generate_ban_bypass_html_report(self, report_data):
+        esc = lambda s: str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        confidence_colors = {
+            "HWID_MATCH": "#f07178", "IP_VERY_CLOSE_TIME": "#ffcb6b",
+            "IP_CLOSE_TIME": "#ffcb6b", "IP_MODERATE_TIME": "#82aaff",
+            "IP_DISTANT_TIME": "#82aaff", "IP_MATCH": "#546e7a", "NO_MATCH": "#546e7a",
+        }
+        confidence_labels = {
+            "HWID_MATCH": "100%", "IP_VERY_CLOSE_TIME": "80-90%", "IP_CLOSE_TIME": "60-70%",
+            "IP_MODERATE_TIME": "40-50%", "IP_DISTANT_TIME": "20-30%", "IP_MATCH": "10-20%",
+        }
+        html_parts = ['<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">']
+        html_parts.append('<title>Проверка обхода банов — DeadSpace Checker</title><style>')
+        html_parts.append("""
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a1a1a;color:#d4d4d4;font-family:'Segoe UI',sans-serif;padding:24px;display:flex;justify-content:center}
+.wrap{max-width:960px;width:100%}
+h1{font-size:22px;margin-bottom:4px;color:#eeffff}
+.sub{color:#888;font-size:13px;margin-bottom:16px}
+.summary{display:flex;gap:16px;margin:16px 0;flex-wrap:wrap}
+.sum-card{background:#252526;border-radius:8px;padding:14px 20px;flex:1;min-width:140px}
+.sum-card .num{font-size:28px;font-weight:700;color:#82aaff}
+.sum-card .lbl{font-size:12px;color:#888;margin-top:2px}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th{text-align:left;padding:10px 12px;font-size:12px;text-transform:uppercase;color:#888;border-bottom:2px solid #333}
+td{padding:10px 12px;font-size:13px;border-bottom:1px solid #2a2a2a}
+tr:hover{background:#252526}
+.badge{display:inline-block;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:600;color:#fff}
+.mono{font-family:'Consolas','Courier New',monospace;font-size:12px;word-break:break-all}
+.gray{color:#888}
+.footer{margin-top:32px;padding-top:12px;border-top:1px solid #333;font-size:11px;color:#555;text-align:center}
+.footer .brand{color:#82aaff;font-weight:600}
+""")
+        html_parts.append('</style></head><body><div class="wrap">')
+        scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        html_parts.append(f'<h1>🔍 Проверка обхода банов</h1>')
+        html_parts.append(f'<div class="sub">Время сканирования: {esc(scan_time)} | Всего записей: {len(report_data)}</div>')
+        total = len(report_data)
+        hwid_matches = sum(1 for r in report_data if r.get("ban_bypass_confidence") == "HWID_MATCH")
+        ip_matches = sum(1 for r in report_data if r.get("ban_bypass_confidence", "").startswith("IP_"))
+        with_findings = sum(1 for r in report_data if r.get("ban_bypass_confidence") != "NO_MATCH")
+        html_parts.append(f'<div class="summary">')
+        html_parts.append(f'<div class="sum-card"><div class="num">{total}</div><div class="lbl">Всего проверено</div></div>')
+        html_parts.append(f'<div class="sum-card"><div class="num">{with_findings}</div><div class="lbl">Найдено обходов</div></div>')
+        html_parts.append(f'<div class="sum-card"><div class="num">{hwid_matches}</div><div class="lbl">HWID совпадений</div></div>')
+        html_parts.append(f'<div class="sum-card"><div class="num">{ip_matches}</div><div class="lbl">IP совпадений</div></div>')
+        html_parts.append('</div>')
+        if report_data:
+            html_parts.append('<table><thead><tr>')
+            html_parts.append('<th>#</th><th>Игрок</th><th>Твинки</th><th>Уверенность</th><th>IP</th><th>HWID</th><th>Статус</th>')
+            html_parts.append('</tr></thead><tbody>')
+            for idx, r in enumerate(report_data, 1):
+                banned = esc(r.get("author_name", "?"))
+                confidence = r.get("ban_bypass_confidence", "NO_MATCH")
+                bypass_users = esc(", ".join(r.get("bypass_user_names", []))) if r.get("bypass_user_names") else "—"
+                ip = esc(r.get("results", [{}])[0].get("ip_address", "")) if r.get("results") else ""
+                hwid_val = esc(r.get("results", [{}])[0].get("hwid", "")) if r.get("results") else ""
+                status = r.get("bypass_success_status", "?")
+                color = confidence_colors.get(confidence, "#546e7a")
+                label = confidence_labels.get(confidence, confidence)
+                stripe = "#1e1e1e" if idx % 2 == 0 else "#1a1a1a"
+                status_badge = '<span class="badge" style="background:#c3e88d;color:#1a1a1a">OK</span>' if "success" in str(status).lower() else '<span class="badge" style="background:#f07178">Ошибка</span>'
+                html_parts.append(f'<tr style="background:{stripe}">')
+                html_parts.append(f'<td class="gray">{idx}</td>')
+                html_parts.append(f'<td>{banned}</td>')
+                html_parts.append(f'<td style="color:#c792ea">{bypass_users}</td>')
+                html_parts.append(f'<td><span class="badge" style="background:{color}">{esc(label)}</span></td>')
+                html_parts.append(f'<td class="mono" style="color:#89ddff">{esc(ip)}</td>')
+                html_parts.append(f'<td class="mono gray">{esc(hwid_val[:48])}</td>')
+                html_parts.append(f'<td>{status_badge}</td>')
+                html_parts.append('</tr>')
+            html_parts.append('</tbody></table>')
+        else:
+            html_parts.append('<div style="text-align:center;padding:48px 0;color:#888;font-size:16px">✅ Обходов бана не обнаружено</div>')
+        html_parts.append('<div class="footer"><span class="brand">Golub4ik (WikiHampter) DeadSpace Checker</span></div>')
+        html_parts.append('</div></body></html>')
+        out_dir = os.path.join(app_dir(), "reports")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, "ban_bypass_report.html")
+        try:
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write("".join(html_parts))
+            logging.info(f"Ban bypass HTML report saved to '{out_path}'")
+            import webbrowser
+            webbrowser.open(f'file://{os.path.abspath(out_path)}')
+        except Exception as e:
+            logging.error(f"Failed to write ban bypass HTML report: {e}")
 
     async def close(self):
         if hasattr(self, 'admin_service') and self.admin_service:

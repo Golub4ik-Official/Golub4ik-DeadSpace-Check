@@ -107,7 +107,7 @@ class BackoffConfig:
 
 @dataclass
 class APIConfig:
-    base_admin_url: str = "https://admin.deadspace14.net"
+    base_admin_url: str = "https://admin.deadspace14.net/admin"
     account_url: str = "https://account.spacestation14.com"
 
     operation_timeout: int = 300
@@ -141,6 +141,12 @@ class ScanConfig:
     ban_bypass_pages: int = 3
 
     max_terms_per_scan: int = 500
+
+    auto_ban_enabled: bool = False
+    html_report_mode: bool = True
+    auto_ban_reason: str = "Ban bypass detected (HWID/IP match)"
+    auto_ban_minutes: int = 0
+    auto_ban_min_confidence: str = "HWID_MATCH"
 
     bypass_search_max_depth: int = 1
     search_max_depth: int = 2

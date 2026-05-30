@@ -21,6 +21,7 @@ from config_system import get_config
 from utils.performance_monitor import PerformanceStats
 
 N_A = "N/A"
+AUTH_COOKIE_NAME = "AspNetCore.Cookies"
 
 
 @dataclass
@@ -92,6 +93,7 @@ class AdminPanel:
 
         self._async_lock = asyncio.Lock()
         self._singleflight_fetches: dict[str, asyncio.Future] = {}
+        self._sso_unreachable = False
 
         self.use_lxml = LXML_AVAILABLE
         if not LXML_AVAILABLE:
@@ -222,6 +224,38 @@ class AdminPanel:
 
         self._client_session = None
 
+    async def try_auth_with_cookie(self, cookie_value: str) -> bool:
+        session = await self._get_session()
+        try:
+            from http.cookies import SimpleCookie
+            c = SimpleCookie()
+            c[self.AUTH_COOKIE_NAME] = cookie_value
+            c[self.AUTH_COOKIE_NAME]["path"] = "/"
+            domain = self.BASE_ADMIN_URL.split("://")[1].split("/")[0]
+            c[self.AUTH_COOKIE_NAME]["domain"] = domain
+            session.cookie_jar.update_cookies(c)
+        except Exception as e:
+            self.logger.warning(f"Cookie jar update failed ({e}), using per-request cookies param")
+            async with session.get(self.PLAYERS_URL, allow_redirects=False,
+                                   cookies={self.AUTH_COOKIE_NAME: cookie_value}) as resp:
+                if resp.status == 200:
+                    self._is_authenticated = True
+                    self._auth_token_timestamp = time.time()
+                    self._auth_token_ttl = 86400
+                    self.logger.info("Cookie auth successful.")
+                    return True
+                self.logger.warning("Cookie auth failed: PLAYERS_URL returned %d", resp.status)
+                return False
+        async with session.get(self.PLAYERS_URL, allow_redirects=False) as resp:
+            if resp.status == 200:
+                self._is_authenticated = True
+                self._auth_token_timestamp = time.time()
+                self._auth_token_ttl = 86400
+                self.logger.info("Cookie auth successful.")
+                return True
+        self.logger.warning("Cookie auth failed: PLAYERS_URL returned %d", resp.status)
+        return False
+
     async def login(self) -> bool:
         async with self._async_lock:
             if self._is_authenticated and (time.time() - self._auth_token_timestamp) < self._auth_token_ttl:
@@ -244,6 +278,9 @@ class AdminPanel:
                         self._auth_token_timestamp = time.time()
                         self.login_attempts = 0
                         return True
+                    if result is False and getattr(self, "_sso_unreachable", False):
+                        self.logger.error("SSO сервер недоступен. Повторные попытки бессмысленны.")
+                        break
                 except Exception as e:
                     self.logger.error(f"Login error: {str(e)}", exc_info=True)
                 if self.logger.isEnabledFor(logging.WARNING):
@@ -262,49 +299,66 @@ class AdminPanel:
                         self.logger.debug("Already logged in (direct access to PLAYERS_URL)")
                     return True
 
-            async with session.get(self.PLAYERS_URL, allow_redirects=True) as response:
-                response_text = await response.text()
-                response.raise_for_status()
+            sso_timeout = aiohttp.ClientTimeout(total=45)
+            try:
+                async with session.get(self.PLAYERS_URL, allow_redirects=True, timeout=sso_timeout) as response:
+                    response_text = await response.text()
+                    response.raise_for_status()
 
-                if str(response.url) == self.PLAYERS_URL:
-                    if self.logger.isEnabledFor(logging.DEBUG):
-                        self.logger.debug("Already logged in (redirected to PLAYERS_URL)")
-                    return True
+                    if str(response.url) == self.PLAYERS_URL:
+                        if self.logger.isEnabledFor(logging.DEBUG):
+                            self.logger.debug("Already logged in (redirected to PLAYERS_URL)")
+                        return True
 
-                if self.ACCOUNT_URL not in str(response.url):
-                    self.logger.error(
-                        f"Unexpected redirect during login. Expected to be on '{self.ACCOUNT_URL}', but was redirected to '{response.url}'. The website's login flow may have changed.")
-                    return False
+                    if self.ACCOUNT_URL not in str(response.url):
+                        self.logger.error(
+                            f"Unexpected redirect during login. Expected to be on '{self.ACCOUNT_URL}', but was redirected to '{response.url}'. The website's login flow may have changed.")
+                        return False
 
-                sso_login_url = str(response.url)
+                    sso_login_url = str(response.url)
 
-                soup = self._parse_html(response_text)
-                token_input = soup.css_first("input[name='__RequestVerificationToken']")
-                if not token_input or not token_input.attributes.get("value"):
-                    self.logger.error(
-                        f"Anti-forgery token not found on the login page ({sso_login_url}). This is a critical part of the login process. The page structure might have changed.")
-                    if self.logger.isEnabledFor(logging.DEBUG):
-                        self.logger.debug(f"HTML content where token was expected:\n{response_text[:2000]}")
-                    return False
-                token = token_input.attributes["value"]
+                    soup = self._parse_html(response_text)
+                    token_input = soup.css_first("input[name='__RequestVerificationToken']")
+                    if not token_input or not token_input.attributes.get("value"):
+                        self.logger.error(
+                            f"Anti-forgery token not found on the login page ({sso_login_url}). This is a critical part of the login process. The page structure might have changed.")
+                        if self.logger.isEnabledFor(logging.DEBUG):
+                            self.logger.debug(f"HTML content where token was expected:\n{response_text[:2000]}")
+                        return False
+                    token = token_input.attributes["value"]
 
-                payload = {
-                    "Input.EmailOrUsername": self.username,
-                    "Input.Password": self.password,
-                    "__RequestVerificationToken": token
-                }
-                headers = {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": sso_login_url,
-                    "Origin": self.ACCOUNT_URL.rstrip('/'),
-                }
+                    payload = {
+                        "Input.EmailOrUsername": self.username,
+                        "Input.Password": self.password,
+                        "__RequestVerificationToken": token
+                    }
+                    headers = {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Referer": sso_login_url,
+                        "Origin": self.ACCOUNT_URL.rstrip('/'),
+                    }
+
+            except asyncio.TimeoutError:
+                self._sso_unreachable = True
+                self.logger.error(
+                    "Таймаут подключения к серверу авторизации account.spacestation14.com. "
+                    "Проверьте VPN/прокси или сетевое подключение."
+                )
+                return False
+            except aiohttp.ClientConnectorError as e:
+                self._sso_unreachable = True
+                self.logger.error(
+                    f"Сервер авторизации account.spacestation14.com недоступен: {e}. "
+                    "Проверьте VPN/прокси или сетевое подключение."
+                )
+                return False
 
             async with session.post(sso_login_url, data=payload, headers=headers, allow_redirects=True) as response:
                 response_text = await response.text()
                 response.raise_for_status()
                 final_url = str(response.url)
 
-                if f"{self.BASE_ADMIN_URL}/signin-oidc" in response_text:
+                if "signin-oidc" in response_text:
                     self.logger.info("OIDC redirect detected, processing...")
                     soup_oidc = self._parse_html(response_text)
                     form = soup_oidc.css_first("form[action*='signin-oidc']")
@@ -329,23 +383,32 @@ class AdminPanel:
                     form_data = {inp.attributes.get("name"): inp.attributes.get("value", "") for inp in inputs if
                                  inp.attributes.get("name")}
 
-                    async with session.post(redirect_action_url, data=form_data, headers={"Referer": final_url},
-                                            allow_redirects=True) as final_response:
-                        final_response_text = await final_response.text()
-                        final_response.raise_for_status()
-                        if "Logout" in final_response_text or "Players" in final_response_text or self.BASE_ADMIN_URL in str(
-                                final_response.url):
-                            self.logger.info("Successfully authenticated after OIDC redirect.")
-                            return True
-                        else:
-                            self.logger.error(
-                                "Authentication failed after OIDC redirect. The final page did not contain expected content ('Logout'/'Players').")
-                            if self.logger.isEnabledFor(logging.DEBUG):
-                                self.logger.debug(
-                                    f"Final OIDC response URL: {str(final_response.url)}\nFinal OIDC response text (snippet):\n{final_response_text[:2000]}")
-                            return False
+                    try:
+                        async with session.post(redirect_action_url, data=form_data, headers={"Referer": final_url},
+                                                allow_redirects=True) as final_response:
+                            final_response_text = await final_response.text()
+                            final_response.raise_for_status()
+                            if "Logout" in final_response_text or "Players" in final_response_text or self.BASE_ADMIN_URL in str(
+                                    final_response.url) or "admin.deadspace14.net" in str(final_response.url):
+                                self.logger.info("Successfully authenticated after OIDC redirect.")
+                                return True
+                            else:
+                                self.logger.error(
+                                    "Authentication failed after OIDC redirect. The final page did not contain expected content ('Logout'/'Players').")
+                                if self.logger.isEnabledFor(logging.DEBUG):
+                                    self.logger.debug(
+                                        f"Final OIDC response URL: {str(final_response.url)}\nFinal OIDC response text (snippet):\n{final_response_text[:2000]}")
+                                return False
+                    except aiohttp.ClientResponseError as e:
+                        self._sso_unreachable = True
+                        self.logger.error(
+                            f"Ошибка сервера при OIDC-авторизации: {e.status}. "
+                            "Сервер админ-панели не принял callback (signin-oidc). "
+                            "Попробуйте позже или проверьте настройки админки."
+                        )
+                        return False
 
-                elif "Logout" in response_text or "Players" in response_text or self.BASE_ADMIN_URL in final_url:
+                elif "Logout" in response_text or "Players" in response_text or self.BASE_ADMIN_URL in final_url or "admin.deadspace14.net" in final_url:
                     self.logger.info("Successfully authenticated.")
                     return True
 
@@ -1108,11 +1171,273 @@ class AdminPanel:
             self.logger.debug(f"Fetching ban hit connections, max_pages={max_pages if max_pages > 0 else 'unlimited'}")
 
         connections_data = await self.fetch_paginated_data(url, max_pages=max_pages)
-        ban_hit_list = [conn.to_dict() for conn in connections_data if conn.is_denied_banned and conn.ban_hits_link]
+        ban_hit_list = [conn.to_dict() for conn in connections_data if conn.is_denied_banned]
         if self.logger.isEnabledFor(logging.DEBUG):
             self.logger.debug(
-                f"Found {len(ban_hit_list)} connections with 'Denied: Banned' status and a ban_hits_link.")
+                f"Found {len(connections_data)} connections total, {len(ban_hit_list)} with 'Denied: Banned' status.")
         return ban_hit_list
+
+    def _set_debug_callback(self, callback):
+        self._debug_callback = callback
+
+    def _debug_log(self, msg):
+        cb = getattr(self, "_debug_callback", None)
+        if cb:
+            cb(msg)
+        else:
+            self.logger.info(msg)
+
+    async def fetch_ban_create_form(self, connection_id: Optional[str] = None) -> Optional[Dict[str, str]]:
+        ban_create_url = f"{self.BANS_URL}/Create"
+        if connection_id:
+            ban_create_url += f"?connectionId={connection_id}"
+
+        if not await self._ensure_authenticated():
+            self._log_warning("Not authenticated, cannot fetch ban create form")
+            return None
+
+        session = await self._get_session()
+        try:
+            async with session.get(ban_create_url) as resp:
+                resp.raise_for_status()
+                html = await resp.text()
+                soup = self._parse_html(html)
+                form = soup.css_first("form")
+                if not form:
+                    self._log_warning("No form found on ban create page")
+                    return None
+
+                form_action = form.attributes.get("action", "")
+                post_url = urljoin(ban_create_url, form_action) if form_action else ban_create_url
+
+                fields = {"token": None, "inputs": {}, "post_url": post_url}
+                token_input = form.css_first("input[name='__RequestVerificationToken']")
+                if token_input:
+                    fields["token"] = token_input.attributes.get("value")
+
+                for inp in form.css("input"):
+                    name = inp.attributes.get("name")
+                    if name:
+                        ftype = inp.attributes.get("type", "text")
+                        fields["inputs"][name] = {"type": ftype, "value": inp.attributes.get("value", "")}
+
+                for sel in form.css("select"):
+                    name = sel.attributes.get("name")
+                    if name:
+                        options = []
+                        for opt in sel.css("option"):
+                            val = opt.attributes.get("value", "")
+                            if opt.attributes.get("selected"):
+                                fields["inputs"][name] = {"type": "select", "value": val, "options": options}
+                                break
+                            options.append(val)
+                        else:
+                            fields["inputs"][name] = {"type": "select", "value": options[0] if options else "", "options": options}
+
+                for tex in form.css("textarea"):
+                    name = tex.attributes.get("name")
+                    if name:
+                        fields["inputs"][name] = {"type": "textarea", "value": ""}
+
+                label_map = {}
+                for_to_name = {}
+                for lbl in form.css("label"):
+                    lbl_for = lbl.attributes.get("for")
+                    lbl_text = lbl.text(strip=True).lower()
+                    if lbl_for:
+                        label_map[lbl_for] = lbl_text
+                    if lbl_text:
+                        label_map[lbl_text] = lbl_for
+
+                for inp in form.css("input, select, textarea"):
+                    name = inp.attributes.get("name")
+                    if name:
+                        for_candidate = name.replace(".", "_")
+                        if for_candidate in label_map or for_candidate in [k for k in label_map.keys() if isinstance(k, str)]:
+                            for_to_name[for_candidate] = name
+
+                fields["label_map"] = label_map
+                fields["for_to_name"] = for_to_name
+
+                self._debug_log(f"Form action={form_action!r}, post_url={post_url}")
+                self._debug_log(f"Found {len(fields['inputs'])} form fields")
+                for n, m in fields["inputs"].items():
+                    self._debug_log(f"INP: name={n!r} type={m.get('type','')!r}")
+                for k, v in label_map.items():
+                    if not k.startswith("Input_"):
+                        self._debug_log(f"LABEL: key={k!r} val={v!r}")
+
+                if not fields["token"]:
+                    self._log_warning("No __RequestVerificationToken found on ban create page")
+                    return None
+                return fields
+        except aiohttp.ClientError as e:
+            self.logger.error(f"Request error fetching ban create form: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error fetching ban create form: {e}", exc_info=True)
+            return None
+
+    def _find_form_field(self, fields, *keywords, expected_type=None):
+        inputs = fields.get("inputs", {})
+        label_map = fields.get("label_map", {})
+        for_map = fields.get("for_to_name", {})
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower in label_map:
+                for_val = label_map[kw_lower]
+                if for_val in for_map:
+                    candidate = for_map[for_val]
+                    if expected_type is None or inputs.get(candidate, {}).get("type") == expected_type:
+                        return candidate
+                if expected_type is None:
+                    return for_val
+            for name, meta in inputs.items():
+                if kw_lower in name.lower():
+                    if expected_type is None or meta.get("type") == expected_type:
+                        return name
+        return None
+
+    async def create_ban(
+        self,
+        reason: str,
+        minutes: int = 0,
+        ip_address: Optional[str] = None,
+        hwid: Optional[str] = None,
+        user_id: Optional[str] = None,
+        connection_id: Optional[str] = None,
+        use_latest_ip: bool = False,
+        use_latest_hwid: bool = False,
+    ) -> bool:
+        ban_create_url = f"{self.BANS_URL}/Create"
+        if connection_id:
+            ban_create_url += f"?connectionId={connection_id}"
+
+        if not await self._ensure_authenticated():
+            self._log_warning("Not authenticated, cannot create ban")
+            return False
+
+        fields = await self.fetch_ban_create_form(connection_id)
+        if not fields:
+            self.logger.error("Cannot create ban: failed to fetch ban create form")
+            return False
+
+        post_url = fields.get("post_url", ban_create_url)
+        inputs = fields.get("inputs", {})
+
+        payload = {"__RequestVerificationToken": fields["token"]}
+
+        name_field = self._find_form_field(fields, "name", "userid", "user_id", "nameorusername")
+        if name_field and user_id:
+            payload[name_field] = user_id
+        elif name_field:
+            payload[name_field] = ""
+
+        ip_field = self._find_form_field(fields, "ip", "ipaddress", "ip_address", "ipaddr")
+        if ip_field and ip_address:
+            payload[ip_field] = ip_address
+        elif ip_field:
+            payload[ip_field] = ""
+
+        hwid_field = self._find_form_field(fields, "hwid", "hwid", "hardwareid", "hardware_id")
+        if hwid_field and hwid:
+            payload[hwid_field] = hwid
+        elif hwid_field:
+            payload[hwid_field] = ""
+
+        minutes_field = self._find_form_field(fields, "minute")
+        if minutes_field:
+            payload[minutes_field] = str(minutes)
+
+        reason_field = self._find_form_field(fields, "reason")
+        self._debug_log(f"reason_field={reason_field!r}, reason_value={reason!r}")
+        if reason_field:
+            payload[reason_field] = reason or "Ban reason not specified"
+
+        severity_field = self._find_form_field(fields, "severity", expected_type="select")
+        if severity_field and severity_field in inputs:
+            payload[severity_field] = inputs[severity_field].get("value", "None")
+
+        for name, meta in inputs.items():
+            if meta.get("type") == "checkbox" and name not in payload:
+                payload[name] = "false"
+            if name not in payload:
+                payload[name] = meta.get("value", "")
+
+        if use_latest_ip:
+            use_latest_ip_field = self._find_form_field(fields, "uselatestip", "uselatestip")
+            if use_latest_ip_field:
+                payload[use_latest_ip_field] = "true"
+
+        if use_latest_hwid:
+            use_latest_hwid_field = self._find_form_field(fields, "uselatesthwid", "uselatesthwid")
+            if use_latest_hwid_field:
+                payload[use_latest_hwid_field] = "true"
+
+        if connection_id:
+            payload["connectionId"] = connection_id
+
+        safe_payload = {k: (v[:50] + "..." if isinstance(v, str) and len(v) > 50 else v) for k, v in payload.items()}
+        self._debug_log(f"PAYLOAD: {safe_payload}")
+
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": ban_create_url,
+            "Origin": self.BASE_ADMIN_URL,
+        }
+
+        session = await self._get_session()
+        try:
+            async with session.post(
+                post_url, data=payload, headers=headers, allow_redirects=False
+            ) as resp:
+                if resp.status in (302, 301):
+                    redirect_location = resp.headers.get("Location", "")
+                    self.logger.info(
+                        f"Ban created successfully (redirect to {redirect_location})"
+                    )
+                    return True
+                if resp.status == 200:
+                    body = await resp.text()
+                    if "ban created" in body.lower():
+                        self.logger.info("Ban created successfully (200 with success message)")
+                        return True
+                    error_match = re.search(
+                        r'<div[^>]*class="[^"]*validation-summary-errors[^"]*"[^>]*>([\s\S]*?)</div>',
+                        body,
+                        re.I,
+                    )
+                    if error_match:
+                        self.logger.error(f"Ban creation failed with validation errors: {error_match.group(1)[:200]}")
+                    else:
+                        self.logger.warning(
+                            f"Ban creation returned 200 but no clear success/error. URL: {resp.url}"
+                        )
+                        span_error = re.search(
+                            r'<span[^>]*class="[^"]*field-validation-error[^"]*"[^>]*>([\s\S]*?)</span>',
+                            body, re.I
+                        )
+                        if span_error:
+                            self.logger.warning(f"Field validation error: {span_error.group(1).strip()[:200]}")
+                        import os as _os, datetime as _dt
+                        err_dir = _os.path.join(_os.path.dirname(__file__) or ".", "ban_errors")
+                        _os.makedirs(err_dir, exist_ok=True)
+                        ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        err_path = _os.path.join(err_dir, f"ban_error_{ts}.html")
+                        with open(err_path, "w", encoding="utf-8") as _f:
+                            _f.write(body)
+                        self._debug_log(f"Saved error HTML to {err_path}")
+                    return False
+                self.logger.error(
+                    f"Ban creation failed with status {resp.status}"
+                )
+                return False
+        except aiohttp.ClientError as e:
+            self.logger.error(f"Request error creating ban: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error creating ban: {e}", exc_info=True)
+            return False
 
     async def fetch_ban_info(self, ban_hits_link: str) -> List[Dict[str, str]]:
         if not ban_hits_link:
@@ -1196,3 +1521,47 @@ class AdminPanel:
         
         self._log_debug(f"Extracted {len(ban_entries)} ban entries from {ban_hits_link}")
         return ban_entries
+
+    async def fetch_ban_templates(self, require_auth: bool = True) -> List[Dict[str, str]]:
+        url = f"{self.BANS_URL}/Create"
+        if require_auth:
+            if not await self._ensure_authenticated():
+                self._log_warning("Not authenticated, cannot fetch ban templates")
+                return []
+        session = await self._get_session()
+        try:
+            async with session.get(url, allow_redirects=False) as resp:
+                if resp.status in (302, 301) and not require_auth:
+                    self._log_warning("Not authenticated, redirect to login")
+                    return []
+                resp.raise_for_status()
+                html = await resp.text()
+                soup = self._parse_html(html)
+                templates = []
+                for table in soup.css("table"):
+                    header_texts = [th.text(strip=True).lower() for th in table.css("th")]
+                    has_title = any("title" in t for t in header_texts)
+                    has_reason = any("reason" in t for t in header_texts)
+                    if not (has_title and has_reason):
+                        continue
+                    for row in table.css("tr"):
+                        tds = row.css("td")
+                        if len(tds) >= 2:
+                            title = tds[0].text(strip=True)
+                            reason = tds[1].text(strip=True)
+                            if title and reason and title.lower() not in ("title", "name"):
+                                templates.append({"title": title, "reason": reason})
+                if not templates:
+                    for table in soup.css("table.table"):
+                        for row in table.css("tr"):
+                            tds = row.css("td")
+                            if len(tds) >= 2:
+                                title = tds[0].text(strip=True)
+                                reason = tds[1].text(strip=True)
+                                if title and reason and len(title) > 3:
+                                    templates.append({"title": title, "reason": reason})
+                self._debug_log(f"Fetched {len(templates)} ban templates")
+                return templates
+        except Exception as e:
+            self.logger.error(f"Error fetching ban templates: {e}")
+            return []

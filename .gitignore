@@ -34,6 +34,12 @@ services/reporting/__pycache__/*
 tests/__pycache__/*
 .pytest_cache/
 
+# Temp SS14.Admin reference clone
+UsersKirilAppDataLocalTempss14admin/
+
+# Ban error pages
+ban_errors/
+
 # PyInstaller
 build/
 dist/

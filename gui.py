@@ -187,6 +187,8 @@ class BanCheckerGUI:
         self.bot_loop = None
         self.running = False
         self.output_queue = queue.Queue()
+        self._admin_panel_loop = None
+        self._admin_panel = None
 
         self._setup_color_tags()
         self._build_ui()
@@ -283,7 +285,10 @@ class BanCheckerGUI:
         self.token_var.set(self.settings.get("discord_token", ""))
         self.msg_count_var.set(str(self.settings.get("message_count", CFG_MESSAGE_LIMIT)))
         self.bypass_pages_var.set(str(self.settings.get("bypass_pages", CFG_BAN_BYPASS_PAGES)))
+        self.auto_ban_var.set(bool(self.settings.get("auto_ban", False)))
+        self.auth_cookie_var.set(self.settings.get("auth_cookie", ""))
         self.nickname_var.set(self.settings.get("last_nickname", ""))
+
 
     def _build_ui(self):
         main = ttk.Frame(self.root, padding="12")
@@ -291,7 +296,7 @@ class BanCheckerGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main.columnconfigure(0, weight=1)
-        main.rowconfigure(4, weight=1)
+        main.rowconfigure(2, weight=1)
 
         cred = ttk.LabelFrame(main, text="Настройки доступа", padding="10")
         cred.grid(row=0, column=0, sticky="ew", pady=(0, 8))
@@ -317,15 +322,31 @@ class BanCheckerGUI:
         self.tk_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ttk.Button(token_frame, text="?", width=2, command=self._show_token_help).grid(row=0, column=1)
 
+        ttk.Label(cred, text="Кука auth (опционально):").grid(row=3, column=0, sticky="w", padx=(0, 6), pady=2)
+        self.auth_cookie_var = tk.StringVar()
+        auth_cookie_frame = ttk.Frame(cred)
+        auth_cookie_frame.grid(row=3, column=1, sticky="ew", pady=2)
+        auth_cookie_frame.columnconfigure(0, weight=1)
+        ttk.Entry(auth_cookie_frame, textvariable=self.auth_cookie_var, show="*").grid(row=0, column=0, sticky="ew")
+
         btn_row = ttk.Frame(cred)
-        btn_row.grid(row=3, column=1, sticky="e", pady=(6, 0))
+        btn_row.grid(row=4, column=1, sticky="e", pady=(6, 0))
         ttk.Checkbutton(btn_row, text="Показать", variable=self.show_secrets,
                         command=self._toggle_secrets).pack(side="left", padx=(0, 8))
         ttk.Button(btn_row, text="Сохранить настройки",
                    command=self._on_save).pack(side="left")
 
-        mode = ttk.LabelFrame(main, text="Режим сканирования", padding="10")
-        mode.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        notebook = ttk.Notebook(main)
+        notebook.grid(row=1, column=0, sticky="nsew", pady=(0, 0))
+        main.rowconfigure(1, weight=1)
+
+        scan_tab = ttk.Frame(notebook, padding="8")
+        notebook.add(scan_tab, text="Поиск")
+        scan_tab.columnconfigure(0, weight=1)
+        scan_tab.rowconfigure(4, weight=1)
+
+        mode = ttk.LabelFrame(scan_tab, text="Режим сканирования", padding="10")
+        mode.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         mode.columnconfigure(1, weight=1)
 
         self.scan_mode = tk.StringVar(value="username")
@@ -357,8 +378,15 @@ class BanCheckerGUI:
         self.bypass_pages_var = tk.StringVar(value="3")
         ttk.Entry(params, textvariable=self.bypass_pages_var, width=8).grid(row=0, column=3, sticky="w")
 
-        actions = ttk.Frame(main)
-        actions.grid(row=2, column=0, sticky="ew", pady=(0, 4))
+        self.auto_ban_var = tk.BooleanVar(value=False)
+        self.auto_ban_cb = ttk.Checkbutton(params, text="Авто-бан IP/HWID",
+                                            variable=self.auto_ban_var)
+        self.auto_ban_cb.grid(row=1, column=0, columnspan=4, sticky="w", padx=(20, 2), pady=(4, 0))
+
+
+
+        actions = ttk.Frame(scan_tab)
+        actions.grid(row=1, column=0, sticky="ew", pady=(0, 4))
         self.start_btn = ttk.Button(actions, text="▶ Запуск", command=self._on_start)
         self.start_btn.pack(side="left", padx=(0, 8))
         self.stop_btn = ttk.Button(actions, text="■ Остановить", command=self._on_stop, state="disabled")
@@ -366,8 +394,8 @@ class BanCheckerGUI:
         self.config_btn = ttk.Button(actions, text="⚙️", width=3, command=self._open_config_dialog)
         self.config_btn.pack(side="left", padx=(8, 0))
 
-        progress_frame = ttk.LabelFrame(main, text="Прогресс", padding="4")
-        progress_frame.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        progress_frame = ttk.LabelFrame(scan_tab, text="Прогресс", padding="4")
+        progress_frame.grid(row=2, column=0, sticky="ew", pady=(0, 6))
         progress_frame.columnconfigure(1, weight=1)
 
         self.progress_var = tk.IntVar(value=0)
@@ -379,8 +407,8 @@ class BanCheckerGUI:
         self.progress_label = ttk.Label(progress_frame, text="")
         self.progress_label.grid(row=0, column=1, sticky="w")
 
-        out = ttk.LabelFrame(main, text="Результаты", padding="4")
-        out.grid(row=4, column=0, sticky="nsew")
+        out = ttk.LabelFrame(scan_tab, text="Результаты", padding="4")
+        out.grid(row=3, column=0, sticky="nsew", pady=(4, 0))
         out.columnconfigure(0, weight=1)
         out.rowconfigure(0, weight=1)
 
@@ -390,17 +418,103 @@ class BanCheckerGUI:
         )
         self.output_text.grid(row=0, column=0, sticky="nsew")
 
+        self._build_ban_tab(notebook)
         self._on_mode_change()
 
+    def _build_ban_tab(self, notebook):
+        ban_tab = ttk.Frame(notebook, padding="8")
+        notebook.add(ban_tab, text="Блокировка")
+        ban_tab.columnconfigure(0, weight=1)
+        ban_tab.rowconfigure(2, weight=1)
+
+        input_frame = ttk.LabelFrame(ban_tab, text="Цели (HWID / IP / Username — по одному на строку)", padding="6")
+        input_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
+        input_frame.columnconfigure(0, weight=1)
+        input_frame.rowconfigure(0, weight=1)
+
+        self.ban_targets_text = scrolledtext.ScrolledText(
+            input_frame, wrap="none", font=("Consolas", 9),
+            bg="#1e1e1e", fg="#d4d4d4", insertbackground="white",
+            height=6,
+        )
+        self.ban_targets_text.grid(row=0, column=0, sticky="nsew")
+        self.ban_targets_text.insert("1.0", "")
+
+        opts_frame = ttk.LabelFrame(ban_tab, text="Параметры блокировки", padding="8")
+        opts_frame.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        opts_frame.columnconfigure(1, weight=1)
+
+        # Причина бана
+        ttk.Label(opts_frame, text="Причина:").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=2)
+        self.ban_reason_var = tk.StringVar(value="Перманентная блокировка, Правило 0: Набегатор или твинк набегатора, обход блокировки путём создания нового аккаунта. Бан в реестр. Обжалование в Discord")
+        reason_entry = ttk.Entry(opts_frame, textvariable=self.ban_reason_var)
+        reason_entry.grid(row=0, column=1, sticky="ew", pady=2)
+        
+        # Кнопки пресетов причин
+        preset_frame = ttk.Frame(opts_frame)
+        preset_frame.grid(row=0, column=2, padx=(4, 0), pady=2)
+        ttk.Button(preset_frame, text="📋 Пресеты", command=self._show_ban_reason_presets).pack(side="left")
+        ttk.Button(preset_frame, text="🔄 Сброс", command=self._reset_ban_reason).pack(side="left", padx=(2, 0))
+
+        # Чекбоксы для авто-бана IP/HWID
+        chk_frame = ttk.LabelFrame(opts_frame, text="Дополнительно", padding="4")
+        chk_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        
+        self.use_latest_ip_var = tk.BooleanVar(value=False)
+        self.use_latest_hwid_var = tk.BooleanVar(value=True)  # По умолчанию включено для защиты
+        
+        ttk.Checkbutton(
+            chk_frame, 
+            text="📍 Забанить последний IP (если бан по нику)",
+            variable=self.use_latest_ip_var
+        ).grid(row=0, column=0, sticky="w", pady=2, padx=4)
+        
+        ttk.Checkbutton(
+            chk_frame, 
+            text="🔑 Забанить последний HWID (если бан по нику)",
+            variable=self.use_latest_hwid_var
+        ).grid(row=0, column=1, sticky="w", pady=2, padx=4)
+
+        ttk.Label(opts_frame, text="Длительность (минут, 0 = навсегда):").grid(row=2, column=0, sticky="w", padx=(0, 6), pady=2)
+        self.ban_minutes_var = tk.StringVar(value="0")
+        ttk.Entry(opts_frame, textvariable=self.ban_minutes_var, width=10).grid(row=2, column=1, sticky="w", pady=2)
+
+        btn_frame = ttk.Frame(opts_frame)
+        btn_frame.grid(row=3, column=0, columnspan=3, sticky="e", pady=(6, 0))
+        self.ban_execute_btn = ttk.Button(
+            btn_frame, text="🔨 Выдать блокировку",
+            command=self._on_ban_execute,
+        )
+        self.ban_execute_btn.pack(side="right")
+
+        results_frame = ttk.LabelFrame(ban_tab, text="Результат", padding="4")
+        results_frame.grid(row=2, column=0, sticky="nsew")
+        results_frame.columnconfigure(0, weight=1)
+        results_frame.rowconfigure(0, weight=1)
+
+        self.ban_result_text = scrolledtext.ScrolledText(
+            results_frame, wrap="word", font=("Consolas", 9),
+            bg="#1e1e1e", fg="#d4d4d4", insertbackground="white",
+            state="disabled",
+        )
+        self.ban_result_text.grid(row=0, column=0, sticky="nsew")
+
     def _fix_shortcuts(self):
-        self.root.bind_all("<Control-KeyPress>", self._on_global_ctrl, add=True)
-        self.root.bind("<Control-KeyPress>", self._on_global_ctrl, add=True)
-        self.output_text.bind("<Control-KeyPress>", self._on_global_ctrl, add=True)
-        for w in (self.pw_entry, self.tk_entry, self.nickname_entry):
+        self.root.bind_all("<KeyPress>", self._on_global_keypress, add=True)
+
+    def _on_global_keypress(self, event):
+        if not (event.state & 0x0004):
+            return None
+        if re.match(r'^[a-z]$', event.keysym):
+            return None
+        action = {67: "<<Copy>>", 86: "<<Paste>>", 88: "<<Cut>>", 65: "<<SelectAll>>"}.get(event.keycode)
+        if action and isinstance(event.widget, (tk.Text, tk.Entry, tk.Listbox)):
             try:
-                w.bind("<Control-KeyPress>", self._on_global_ctrl, add=True)
+                event.widget.event_generate(action)
+                return "break"
             except Exception:
                 pass
+        return None
 
     def _toggle_secrets(self):
         show = "" if self.show_secrets.get() else "*"
@@ -424,11 +538,13 @@ class BanCheckerGUI:
 
     def _on_mode_change(self):
         self.nickname_entry.config(state="normal" if self.scan_mode.get() == "username" else "disabled")
+        self.auto_ban_cb.config(state="normal" if self.scan_mode.get() == "banbypass" else "disabled")
 
     def _on_save(self):
         self.settings["admin_username"] = self.username_var.get()
         self.settings["admin_password"] = self.password_var.get()
         self.settings["discord_token"] = self.token_var.get()
+        self.settings["auth_cookie"] = self.auth_cookie_var.get()
         self.settings["last_nickname"] = self.nickname_var.get()
         try:
             self.settings["message_count"] = int(self.msg_count_var.get())
@@ -438,6 +554,7 @@ class BanCheckerGUI:
             self.settings["bypass_pages"] = int(self.bypass_pages_var.get())
         except ValueError:
             pass
+        self.settings["auto_ban"] = bool(self.auto_ban_var.get())
         self._save_settings()
         messagebox.showinfo("", "Настройки сохранены")
 
@@ -511,7 +628,7 @@ class BanCheckerGUI:
         if not self.username_var.get() or not self.password_var.get():
             messagebox.showerror("Ошибка", "Укажите ADMIN_USERNAME и ADMIN_PASSWORD")
             return
-        if not self.token_var.get():
+        if not self.token_var.get() and self.scan_mode.get() != "banbypass":
             messagebox.showerror("Ошибка", "Укажите DISCORD_TOKEN")
             return
 
@@ -584,6 +701,8 @@ class BanCheckerGUI:
             cfg.scan.check_ban_bypass = scan_mode == "banbypass"
             cfg.scan.message_limit = msg_limit
             cfg.scan.ban_bypass_pages = bypass_pages
+            cfg.scan.auto_ban_enabled = bool(self.settings.get("auto_ban", False)) and scan_mode == "banbypass"
+            cfg.scan.html_report_mode = scan_mode == "banbypass"
             cfg.logging.log_level = "INFO"
 
             logging.info("Starting Ban Checker Bot")
@@ -595,6 +714,7 @@ class BanCheckerGUI:
             logging.info(f"Scan mode: {mode_desc}")
 
             admin_panel = AdminPanel(cfg.auth.admin_username, cfg.auth.admin_password)
+            self._admin_panel = admin_panel
 
             bot_config = {
                 "TARGET_CHANNEL_ID": cfg.discord.target_channel_id,
@@ -609,6 +729,8 @@ class BanCheckerGUI:
                 "graph_output": cfg.report.graph_output,
                 "message_interval_start": None,
                 "message_interval_end": None,
+                "html_report_mode": cfg.scan.html_report_mode,
+                "auth_cookie": self.settings.get("auth_cookie", ""),
             }
 
             logging.info(f"Discord token length: {len(discord_token)}, starts with: {discord_token[:10]}...")
@@ -620,7 +742,11 @@ class BanCheckerGUI:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             self.bot_loop = loop
-            loop.run_until_complete(bot.client.start(discord_token))
+            self._admin_panel_loop = loop
+            if cfg.scan.html_report_mode:
+                loop.run_until_complete(bot.run_offline())
+            else:
+                loop.run_until_complete(bot.client.start(discord_token))
 
         except Exception as e:
             self.output_queue.put(f"\nОшибка: {e}\n")
@@ -923,9 +1049,7 @@ class BanCheckerGUI:
                         text = item.get("text", "")
                         if not text:
                             continue
-                        text_upper = text.upper()
-                        if "ERROR" in text_upper or "CRITICAL" in text_upper:
-                            self._insert_colored(text)
+                        self._insert_colored(text)
                     elif msg_type == "punishment":
                         self._render_punishment(item)
                     elif msg_type == "player_summary":
@@ -957,11 +1081,15 @@ class BanCheckerGUI:
                         self._scan_start = None
                         self._last_progress_msg = ""
                         self._show_report_button()
-                        self.root.after(500, self._generate_html_report)
+                        if self.scan_mode.get() != "banbypass":
+                            self.root.after(500, self._generate_html_report)
+                    elif item == "__BAN_DONE__":
+                        self.ban_execute_btn.config(state="normal")
                     elif re.match(r'^\d{4}-\d{2}-\d{2}', item) or 'API Calls=' in item or 'Depth Dist=' in item:
                         continue
                     else:
                         self._insert_colored(item)
+                        self._ban_log(item)
 
             self.output_text.see(tk.END)
         except queue.Empty:
@@ -980,20 +1108,8 @@ class BanCheckerGUI:
         self.root.after(50, self._poll_output)
 
     def _on_global_ctrl(self, event):
-        kc = event.keycode
-        w = event.widget
-        if kc == 67:
-            w.event_generate('<<Copy>>')
-            return "break"
-        elif kc == 86:
-            w.event_generate('<<Paste>>')
-            return "break"
-        elif kc == 88:
-            w.event_generate('<<Cut>>')
-            return "break"
-        elif kc == 65:
-            w.event_generate('<<SelectAll>>')
-            return "break"
+        # Устаревший метод, больше не используется
+        # Стандартные Ctrl+C/V/X работают автоматически в tkinter
         return None
 
     def _log(self, text):
@@ -1458,6 +1574,274 @@ class BanCheckerGUI:
         btn_frame.pack(fill="x", padx=8, pady=(0, 8))
         ttk.Button(btn_frame, text="Сохранить", command=_save_config).pack(side="right", padx=(4, 0))
         ttk.Button(btn_frame, text="Отмена", command=dialog.destroy).pack(side="right")
+
+    def _ban_log(self, text, color=None):
+        self.ban_result_text.config(state="normal")
+        if color:
+            self.ban_result_text.insert(tk.END, text, color)
+        else:
+            self.ban_result_text.insert(tk.END, text)
+        self.ban_result_text.see(tk.END)
+        self.ban_result_text.config(state="disabled")
+
+    @staticmethod
+    def _detect_target_type(value):
+        value = value.strip()
+        if not value:
+            return None
+        # IP адрес
+        if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', value):
+            return "ip"
+        # User ID (GUID)
+        if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', value, re.I):
+            return "user_id"
+        # HWID - обычно очень длинная строка с base64-подобными символами или GUID-подобные форматы
+        # HWID обычно > 30 символов и содержит специфичные символы
+        if len(value) > 30 and re.match(r'^[A-Za-z0-9+/=,\-{}: ]+$', value):
+            return "hwid"
+        # Всё остальное считаем никнеймом/именем пользователя
+        return "username"
+
+    def _reset_ban_reason(self):
+        """Сброс причины на стандартную"""
+        self.ban_reason_var.set("Перманентная блокировка, Правило 0: Набегатор или твинк набегатора, обход блокировки путём создания нового аккаунта. Бан в реестр. Обжалование в Discord")
+
+    def _show_ban_reason_presets(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Пресеты причин бана")
+        dialog.geometry("600x500")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding="15")
+        frame.pack(fill="both", expand=True)
+
+        presets = [
+            ("Обход блокировки",
+             "Перма ДК. Правило 9.2. Попытка обхода блокировки путем создания нового аккаунта. Просим откликнуться на нашем Discord сервере в канале с обжалованиями."),
+
+            ("ПДК по жалобе",
+             "Перма ДК. На вас поступила жалоба, просим откликнуться в канале жалоб на игроков. [Ссылка на жалобу]."),
+
+            ("Набег на сервер партнёров",
+             "Перманентная блокировка. Правило 0. Набег на сервер партнёров. Обжалование в Discord."),
+
+            ("Набегаторский твинк HWID/IP",
+             "Перманентная блокировка, Правило 0: Набегатор или твинк набегатора, обход блокировки путём создания нового аккаунта. Бан в реестр. Обжалование в Discord"),
+
+            ("Перманентная блокировка",
+             "Перманентная блокировка, Правило X, рецидив(если имеется): [краткое, понятное описание ситуации]. Обжалование в Discord."),
+
+            ("Набегатор",
+             "Перманентная блокировка, Правило 0: Набегатор. [краткое, понятное описание ситуации]. Бан в реестр. Обжалование в Discord."),
+
+            ("БВО",
+             "Перманентная блокировка БВО: Правило X, [Краткое, понятное описания ситуации]. Без возможности обжалования."),
+        ]
+
+        canvas = tk.Canvas(frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        scrollable = ttk.Frame(canvas)
+        scrollable.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        ttk.Label(scrollable, text="Локальные пресеты:", font=("", 11, "bold")).pack(anchor="w", pady=(0, 5))
+
+        for title, reason in presets:
+            btn = ttk.Button(
+                scrollable, text=title,
+                command=lambda r=reason: self._apply_preset_reason(r, dialog)
+            )
+            btn.pack(fill="x", pady=2)
+
+        ttk.Separator(scrollable, orient="horizontal").pack(fill="x", pady=(10, 5))
+        ttk.Label(scrollable, text="Пресеты с админ-сайта:", font=("", 11, "bold")).pack(anchor="w", pady=(0, 5))
+
+        load_btn = ttk.Button(scrollable, text="📥 Загрузить с админки")
+        load_btn.pack(fill="x", pady=2)
+        loading_label = ttk.Label(scrollable, text="")
+        loading_label.pack()
+
+        def load_templates():
+            load_btn.config(state="disabled")
+            loading_label.config(text="Загрузка...")
+            import threading, asyncio
+            threading.Thread(target=self._load_admin_templates_thread, args=(scrollable, loading_label, dialog), daemon=True).start()
+
+        load_btn.config(command=load_templates)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        ttk.Button(frame, text="Отмена", command=dialog.destroy).pack(fill="x", pady=(10, 0))
+
+    def _load_admin_templates_thread(self, parent, loading_label, dialog):
+        try:
+            if self._admin_panel and self._admin_panel_loop and not self._admin_panel_loop.is_closed():
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._fetch_templates_shared(parent, loading_label, dialog),
+                        self._admin_panel_loop
+                    )
+                    future.result(timeout=15)
+                    return
+                except asyncio.TimeoutError:
+                    parent.after(0, lambda: loading_label.config(text="❌ Таймаут загрузки шаблонов"))
+                    return
+                except Exception as e:
+                    parent.after(0, lambda m=str(e): loading_label.config(text=f"❌ Ошибка: {m[:80]}"))
+                    return
+            parent.after(0, lambda: loading_label.config(text="❌ Запустите сканирование игрока для авторизации на админ-сайте"))
+        except Exception as exc:
+            parent.after(0, lambda m=str(exc): loading_label.config(text=f"❌ Ошибка: {m[:80]}"))
+
+    async def _fetch_templates_shared(self, parent, loading_label, dialog):
+        try:
+            templates = await self._admin_panel.fetch_ban_templates(require_auth=False)
+            if not templates and not self._admin_panel._is_authenticated:
+                parent.after(0, lambda: loading_label.config(text="❌ Нет активной сессии. Сканируйте игрока для авторизации"))
+                return
+            parent.after(0, lambda t=templates: self._display_admin_templates(parent, t, dialog, loading_label))
+        except Exception as e:
+            parent.after(0, lambda m=str(e): loading_label.config(text=f"❌ Ошибка: {m[:80]}"))
+
+    def _display_admin_templates(self, parent, templates, dialog, loading_label):
+        loading_label.config(text="")
+        if not templates:
+            loading_label.config(text="Не удалось загрузить шаблоны с админки")
+            return
+        loading_label.config(text=f"✅ Загружено {len(templates)} шаблонов с админки")
+        for t in templates:
+            btn = ttk.Button(
+                parent, text=f"📌 {t['title']}",
+                command=lambda r=t["reason"]: self._apply_preset_reason(r, dialog)
+            )
+            btn.pack(fill="x", pady=2, before=loading_label)
+
+    def _apply_preset_reason(self, reason, dialog):
+        """Применить выбранный пресет"""
+        self.ban_reason_var.set(reason)
+        dialog.destroy()
+
+    def _on_ban_execute(self):
+        admin_username = self.username_var.get()
+        admin_password = self.password_var.get()
+        if not admin_username or not admin_password:
+            messagebox.showerror("Ошибка", "Укажите имя и пароль администратора")
+            return
+
+        raw = self.ban_targets_text.get("1.0", tk.END).strip()
+        if not raw:
+            messagebox.showerror("Ошибка", "Введите цели для блокировки")
+            return
+
+        reason = self.ban_reason_var.get().strip()
+        if not reason:
+            messagebox.showerror("Ошибка", "Укажите причину блокировки")
+            return
+
+        try:
+            minutes = int(self.ban_minutes_var.get())
+        except ValueError:
+            minutes = 0
+
+        targets = [line.strip() for line in raw.split("\n") if line.strip()]
+        if not targets:
+            messagebox.showerror("Ошибка", "Нет целей для блокировки")
+            return
+
+        self.ban_result_text.config(state="normal")
+        self.ban_result_text.delete("1.0", tk.END)
+        self.ban_result_text.config(state="disabled")
+        self.ban_execute_btn.config(state="disabled")
+
+        threading.Thread(
+            target=self._run_ban_worker,
+            args=(admin_username, admin_password, targets, reason, minutes),
+            daemon=True,
+        ).start()
+
+    def _run_ban_worker(self, admin_username, admin_password, targets, reason, minutes):
+        import sys as _sys
+        import traceback as _tb
+        try:
+            import asyncio as _asyncio
+
+            loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(
+                self._ban_worker_async(admin_username, admin_password, targets, reason, minutes)
+            )
+            loop.close()
+            self.output_queue.put(f"\n{'─'*50}\nБлокировка завершена: {result.get('ok', 0)} успешно, {result.get('fail', 0)} ошибок\n")
+        except Exception as e:
+            self.output_queue.put(f"\nОшибка выполнения блокировки: {e}\n{_tb.format_exc()}\n")
+        finally:
+            self.output_queue.put("__BAN_DONE__")
+
+    async def _ban_worker_async(self, admin_username, admin_password, targets, reason, minutes):
+        from admin_panel import AdminPanel
+        import os, datetime
+        panel = AdminPanel(admin_username, admin_password)
+        panel._set_debug_callback(lambda msg: self.output_queue.put(msg + "\n"))
+        ok_count = 0
+        fail_count = 0
+        error_html_dir = os.path.join(os.path.dirname(__file__) or ".", "ban_errors")
+
+        self.output_queue.put("🔑 Выполняю вход в админ-панель...\n")
+        logged_in = await panel.login()
+        if not logged_in:
+            self.output_queue.put("❌ Ошибка входа в админ-панель\n")
+            return {"ok": 0, "fail": len(targets)}
+
+        # Читаем значения чекбоксов
+        use_latest_ip = self.use_latest_ip_var.get()
+        use_latest_hwid = self.use_latest_hwid_var.get()
+
+        self.output_queue.put(f"📋 Начинаю блокировку {len(targets)} целей...\n")
+        self.output_queue.put(f"   Использовать последний IP: {'Да' if use_latest_ip else 'Нет'}\n")
+        self.output_queue.put(f"   Использовать последний HWID: {'Да' if use_latest_hwid else 'Нет'}\n\n")
+
+        for idx, target in enumerate(targets):
+            detected_type = self._detect_target_type(target)
+            log_line = f"[{idx + 1}/{len(targets)}] {target}  →  тип: {detected_type}  ...  "
+            self.output_queue.put(log_line)
+
+            try:
+                kwargs = dict(reason=reason, minutes=minutes)
+                if detected_type == "ip":
+                    kwargs["ip_address"] = target
+                elif detected_type == "hwid":
+                    kwargs["hwid"] = target
+                elif detected_type == "user_id":
+                    kwargs["user_id"] = target
+                else:
+                    # Бан по нику/имени пользователя
+                    kwargs["user_id"] = target
+                    # Если включены чекбоксы, используем последние IP и HWID
+                    if use_latest_ip:
+                        kwargs["use_latest_ip"] = True
+                    if use_latest_hwid:
+                        kwargs["use_latest_hwid"] = True
+
+                success = await panel.create_ban(**kwargs)
+                if success:
+                    ok_count += 1
+                    self.output_queue.put("✅ УСПЕХ\n")
+                else:
+                    fail_count += 1
+                    self.output_queue.put("❌ ОШИБКА\n")
+            except Exception as e:
+                fail_count += 1
+                self.output_queue.put(f"❌ ИСКЛЮЧЕНИЕ: {e}\n")
+
+        self.output_queue.put(f"\n{'─'*50}\n")
+        self.output_queue.put(f"✅ Успешно: {ok_count}\n")
+        self.output_queue.put(f"❌ Ошибок: {fail_count}\n")
+
+        await panel.close()
+        return {"ok": ok_count, "fail": fail_count}
 
     def _on_close(self):
         self.running = False

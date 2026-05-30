@@ -1376,6 +1376,7 @@ class Scanner:
                 timeout=self._operation_timeout
             )
 
+            self._report_log(f"📊 Найдено забаненных подключений: {len(ban_hit_connections)}")
             if not ban_hit_connections:
                 self.logger.info("No ban hit connections found.")
                 return []
@@ -1426,6 +1427,7 @@ class Scanner:
 
             cache_hits = sum(1 for term in processed_terms if term in self.connections_cache)
             duration = (datetime.now() - start_time).total_seconds()
+            self._report_log(f"📊 Итого: обработано {len(ban_hit_connections)} банов, найдено {len(results)} обходов")
             self.logger.info(
                 f"Ban Bypass Check completed in {duration:.2f}s: processed {len(ban_hit_connections)} ban hits, "
                 f"found {len(results)} results with depth {max_depth}, "
@@ -1449,44 +1451,113 @@ class Scanner:
             self.logger.error(f"Error in _process_ban_hit_with_timeout: {e}")
             return None
 
+    def _format_ban_reason(self, template, banned_user_name, bypass_reason, bypass_user_names):
+        try:
+            return template.format(
+                user=banned_user_name,
+                confidence=bypass_reason,
+                bypassers=", ".join(bypass_user_names) if bypass_user_names else "unknown",
+            )
+        except KeyError:
+            return template
+
+    async def _auto_ban_bypass(self, banned_user_name, user_id, ip_address, hwid,
+                                bypass_reason, bypass_user_names):
+        cfg = get_config()
+        if not cfg.scan.auto_ban_enabled:
+            return False
+
+        confidence_rank = {
+            "NO_MATCH": 0, "IP_MATCH": 1, "IP_DISTANT_TIME": 2,
+            "IP_MODERATE_TIME": 3, "IP_CLOSE_TIME": 4,
+            "IP_VERY_CLOSE_TIME": 5, "HWID_MATCH": 6,
+        }
+        min_rank = confidence_rank.get(cfg.scan.auto_ban_min_confidence, 6)
+        actual_rank = confidence_rank.get(bypass_reason, 0)
+        if actual_rank < min_rank:
+            self.logger.info(
+                f"Auto-ban skipped for {banned_user_name}: confidence {bypass_reason} "
+                f"< minimum {cfg.scan.auto_ban_min_confidence}"
+            )
+            return False
+
+        auto_banned = False
+        reason = self._format_ban_reason(cfg.scan.auto_ban_reason, banned_user_name, bypass_reason, bypass_user_names)
+        targets = []
+
+        if hwid and hwid != "N/A":
+            targets.append(("hwid", hwid))
+
+        if ip_address and ip_address != "N/A":
+            targets.append(("ip", ip_address))
+
+        for target_type, target_value in targets:
+            kwargs = dict(reason=reason, minutes=cfg.scan.auto_ban_minutes)
+            if user_id and user_id != "N/A":
+                kwargs["user_id"] = user_id
+            if target_type == "ip":
+                kwargs["ip_address"] = target_value
+            elif target_type == "hwid":
+                kwargs["hwid"] = target_value
+
+            result = await self.admin.auto_ban(**kwargs)
+
+            if result:
+                self.logger.info(
+                    f"Auto-ban issued for {banned_user_name}: {target_type}={target_value} "
+                    f"(confidence: {bypass_reason})"
+                )
+                auto_banned = True
+            else:
+                self.logger.error(
+                    f"Auto-ban FAILED for {banned_user_name}: {target_type}={target_value}"
+                )
+
+        return auto_banned
+
     async def _process_ban_hit(self, ban_hit, max_depth, processed_terms, progress_stats):
         try:
             progress_stats['processed'] += 1
             ban_id = ban_hit.get("connection_id", "") or ban_hit.get("ban_hits_link", "")
             ban_hit_time = datetime.strptime(ban_hit["time"], "%Y-%m-%d %H:%M:%S")
             user_id = ban_hit.get("user_id")
+            user_name = ban_hit.get("user_name", "?")
             if not user_id or user_id == "N/A":
+                self._report_log(f"⏭️ {user_name}: нет user_id, пропущен")
                 return None
             ban_hits_link = ban_hit.get("ban_hits_link")
             async with asyncio.Lock():
                 if ban_id and ban_id in processed_terms:
+                    self._report_log(f"⏭️ {user_name}: уже обработан")
                     return None
                 if ban_id:
                     processed_terms.add(ban_id)
-            ban_info_list = await self.admin.fetch_with_rate_limit(
-                self.admin_panel.fetch_ban_info,
-                ban_hits_link
-            )
+            banned_user_name = ban_hit.get("user_name", "")
+            ip_address = ban_hit.get("ip_address", "")
+            hwid = ban_hit.get("hwid", "")
+            ban_time_str = ban_hit["time"]
+            ban_expires_str = ban_hit["time"]
             
-            if not ban_info_list:
-                self.logger.warning(f"No ban info found for link: {ban_hits_link}")
-                return None
-            
-            if len(ban_info_list) > 1:
-                self.logger.info(f"Found {len(ban_info_list)} ban bypass attempts for connection {ban_id}")
-                for idx, entry in enumerate(ban_info_list):
-                    ban_time = entry.get("ban_time", "unknown")
-                    ban_reason = entry.get("ban_reason", "unknown")
-                    self.logger.info(f"  Ban bypass #{idx + 1}: {ban_time} (reason: {ban_reason})")
-            
-            ban_info = ban_info_list[0]
-            banned_user_name = ban_info.get("banned_user_name") or ban_hit.get("user_name", "")
-            user_id = ban_info.get("user_id") or user_id
-            ip_address = ban_info.get("ip_address") or ban_hit.get("ip_address", "")
-            hwid = ban_info.get("hwid") or ban_hit.get("hwid", "")
+            if ban_hits_link:
+                ban_info_list = await self.admin.fetch_with_rate_limit(
+                    self.admin_panel.fetch_ban_info,
+                    ban_hits_link
+                )
+                if ban_info_list:
+                    if len(ban_info_list) > 1:
+                        self.logger.info(f"Found {len(ban_info_list)} ban bypass attempts for connection {ban_id}")
+                        for idx, entry in enumerate(ban_info_list):
+                            ban_time = entry.get("ban_time", "unknown")
+                            ban_reason = entry.get("ban_reason", "unknown")
+                            self.logger.info(f"  Ban bypass #{idx + 1}: {ban_time} (reason: {ban_reason})")
+                    ban_info = ban_info_list[0]
+                    banned_user_name = ban_info.get("banned_user_name") or banned_user_name
+                    user_id = ban_info.get("user_id") or user_id
+                    ip_address = ban_info.get("ip_address") or ip_address
+                    hwid = ban_info.get("hwid") or hwid
+                    ban_time_str = ban_info.get("ban_time", ban_time_str)
+                    ban_expires_str = ban_info.get("expires", ban_expires_str)
             hwid_erased = not hwid or hwid.strip() == ""
-            ban_time_str = ban_info.get("ban_time", ban_hit["time"])
-            ban_expires_str = ban_info.get("expires", ban_hit["time"])
             self.logger.info(f"Processing ban hit for user '{banned_user_name}' (ID: {user_id})")
             connections = await self._gather_connections(
                 user_id,
@@ -1550,8 +1621,30 @@ class Scanner:
                     complaint_links
             )
             if not has_meaningful_result:
+                self._report_log(f"⏭️ {banned_user_name}: нет признаков обхода (совпадений IP/HWID не найдено)")
                 self.logger.info(f"No meaningful bypass detected for {banned_user_name}")
                 return None
+
+            confidence_label = {
+                "HWID_MATCH": "HWID-совпадение",
+                "IP_VERY_CLOSE_TIME": "IP+время (очень близко)",
+                "IP_CLOSE_TIME": "IP+время (близко)",
+                "IP_MODERATE_TIME": "IP+время (умеренно)",
+                "IP_DISTANT_TIME": "IP+время (давно)",
+                "IP_MATCH": "IP-совпадение",
+            }.get(bypass_reason, bypass_reason)
+            extra = ""
+            if hwid_erased:
+                extra += " HWID стёрт"
+            if complaint_links:
+                extra += f" {len(complaint_links)} жалоб"
+            self._report_log(f"🔍 {banned_user_name}: {confidence_label}{extra} твинки={bypass_user_names}")
+
+            await self._auto_ban_bypass(
+                banned_user_name, user_id, ip_address, hwid,
+                bypass_reason, bypass_user_names
+            )
+
             report = {
                 "message_id": "BanBypassCheck",
                 "message_link": ban_hits_link,
@@ -1752,8 +1845,8 @@ class Scanner:
                         continue
                     try:
                         conn_dt = datetime.strptime(conn_time, "%Y-%m-%d %H:%M:%S")
-                        diff_minutes = abs((conn_dt - ban_hit_time).total_seconds() / 60.0)
-                        if 5 <= diff_minutes <= 10:
+                        diff_minutes = (conn_dt - ban_hit_time).total_seconds() / 60.0
+                        if diff_minutes >= 5:
                             time_suspected_users.append(conn.get("user_name"))
                     except ValueError:
                         self.logger.warning(f"Invalid time format: {conn_time}")

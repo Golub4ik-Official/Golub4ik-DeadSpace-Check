@@ -1004,6 +1004,63 @@ class AdminService:
         if not main_result.get("raw_html_snippet") and new_data.get("raw_html_snippet"):
             main_result["raw_html_snippet"] = new_data.get("raw_html_snippet")
 
+    @monitor_performance
+    async def auto_ban(
+        self,
+        reason: str,
+        minutes: int = 0,
+        ip_address: Optional[str] = None,
+        hwid: Optional[str] = None,
+        user_id: Optional[str] = None,
+        connection_id: Optional[str] = None,
+    ) -> bool:
+        if self._should_apply_cooldown():
+            await self._apply_emergency_cooldown()
+
+        await self._optimizer.wait_adaptive_delay()
+
+        if not await self.login():
+            self.logger.error("Authentication failed for auto_ban")
+            return False
+
+        op_start_time = time.time()
+        success = False
+
+        try:
+            async with self._optimizer.concurrency_semaphore:
+                async with asyncio.timeout(self._request_timeout):
+                    async with self.rate_limiter:
+                        result = await self.admin_panel.create_ban(
+                            reason=reason,
+                            minutes=minutes,
+                            ip_address=ip_address,
+                            hwid=hwid,
+                            user_id=user_id,
+                            connection_id=connection_id,
+                        )
+                        success = True
+                        return result
+        except asyncio.TimeoutError:
+            self.error_tracking['consecutive_timeouts'] += 1
+            self.error_tracking['timeout_requests'] += 1
+            self.logger.error(f"auto_ban timed out after {self._request_timeout}s")
+            return False
+        except Exception as e:
+            self.error_tracking['consecutive_errors'] += 1
+            self.error_tracking['error_requests'] += 1
+            self.logger.error(f"Error in auto_ban: {e}")
+            return False
+        finally:
+            op_elapsed_time = time.time() - op_start_time
+            self.error_tracking['total_requests'] += 1
+            if success:
+                self.error_tracking['consecutive_timeouts'] = 0
+                self.error_tracking['consecutive_errors'] = 0
+                self.error_tracking['last_success_time'] = time.time()
+                self.error_tracking['successful_requests'] += 1
+            await self._optimizer.record_latency(op_elapsed_time, success=success)
+            self.perf_tracker.record("auto_ban", op_elapsed_time)
+
     def convert_to_player(self, account_info_dict: Optional[Dict[str, Any]]) -> Player:
         if not account_info_dict or not isinstance(account_info_dict, dict):
             if self.logger.isEnabledFor(logging.WARNING):

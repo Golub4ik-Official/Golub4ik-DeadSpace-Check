@@ -58,7 +58,7 @@ class TestConfigDefaults:
 
     def test_api_config_defaults(self):
         cfg = APIConfig()
-        assert cfg.base_admin_url == "https://admin.deadspace14.net"
+        assert cfg.base_admin_url == "https://admin.deadspace14.net/admin"
         assert cfg.max_concurrent_requests == 4
         assert cfg.request_timeout == 120
 
